@@ -94,7 +94,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.1.0';
+export const ENGINE_VERSION = '1.2.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -129,28 +129,28 @@ export const DEFAULT_PARAMS = Object.freeze({
 
 /** Labels/units for the params panel. `adv` = hidden under "advanced". */
 export const PARAM_INFO = {
-    SACT: { label: 'SA conduction', unit: 'ms', normal: [45, 125], ref: 'josephson' },
-    PA: { label: 'PA (intra-atrial)', unit: 'ms', normal: [25, 55], ref: 'josephson' },
-    HV: { label: 'HV', unit: 'ms', normal: [35, 55], ref: 'josephson' },
-    AHmin: { label: 'AH minimum', unit: 'ms', normal: [55, 125], normalOf: 'AH', ref: 'josephson' },
-    PRmin: { label: 'PR min (pairing)', unit: 'ms', adv: true },
-    PRmax: { label: 'PR max (pairing)', unit: 'ms', adv: true },
-    VA: { label: 'VA (QRS onset → retro P)', unit: 'ms', threshold: { at: 70, meaning: '≤ 70 ms favours typical AVNRT; > 70 ms allows orthodromic AVRT' }, ref: 'issa' },
-    apVdelay: { label: 'QRS onset → AP ventricular end', unit: 'ms', adv: true },
-    apToAV: { label: 'Retro A → AV-node entry', unit: 'ms', adv: true },
-    vExit: { label: 'PVC focus → His exit', unit: 'ms', adv: true },
-    ectopicVA: { label: 'Ectopic retro VA (empty = concealed)', unit: 'ms' },
-    wideQrsMs: { label: 'Wide QRS from', unit: 'ms', adv: true },
-    fWaveMs: { label: 'F–F override (empty = from your F marks)', unit: 'ms', adv: true },
-    fPhaseMs: { label: 'F phase override (one F at)', unit: 'ms', adv: true },
-    fibMeanMs: { label: 'Mean f–f cycle', unit: 'ms' },
-    concealDepth: { label: 'Concealed depth (0–1)', unit: '', adv: true },
-    blockDepth: { label: 'Block depth (0–1)', unit: '', adv: true },
-    blockBelowHis: { label: 'Block below the His (0 = AV node, 1 = infra-His)', unit: '' },
-    jtNodeMs: { label: 'Focus → His (in the node)', unit: 'ms', adv: true },
-    apAnteMs: { label: 'Pathway conduction (atrial end → delta wave)', unit: 'ms' },
-    vhMs: { label: 'QRS onset → retrograde His (through ventricular muscle)', unit: 'ms', adv: true },
-    hPrimeLead: { label: 'H′ before the P reaches the node', unit: 'ms' },
+    SACT: { label: 'SA conduction', unit: 'ms', normal: [45, 125], ref: 'josephson', what: 'sinus-node discharge → P onset: the slope across the SN tier' },
+    PA: { label: 'PA (intra-atrial)', unit: 'ms', normal: [25, 55], ref: 'josephson', what: 'P onset → AV-node entry: where the atrial line meets the AV tier' },
+    HV: { label: 'HV', unit: 'ms', normal: [35, 55], ref: 'josephson', what: 'His → QRS onset: the His line ends this long before the V line' },
+    AHmin: { label: 'AH minimum', unit: 'ms', normal: [55, 125], normalOf: 'AH', ref: 'josephson', what: 'the fastest the AV node conducts; a PR shorter than PA + AH min + HV is drawn as pre-excitation' },
+    PRmin: { label: 'PR min (pairing)', unit: 'ms', adv: true, what: 'a P closer than this to a QRS is not the one that conducted it' },
+    PRmax: { label: 'PR max (pairing)', unit: 'ms', adv: true, what: 'a P further than this from a QRS is not the one that conducted it' },
+    VA: { label: 'VA (QRS onset → retro P)', unit: 'ms', threshold: { at: 70, meaning: '≤ 70 ms favours typical AVNRT; > 70 ms allows orthodromic AVRT' }, ref: 'issa', what: 'QRS onset → retrograde P onset: where the returning wave reaches the atrium' },
+    apVdelay: { label: 'QRS onset → AP ventricular end', unit: 'ms', adv: true, what: 'QRS onset → the ventricular end of the accessory pathway' },
+    apToAV: { label: 'Retro A → AV-node entry', unit: 'ms', adv: true, what: 'retrograde atrial activation → the next entry into the AV node' },
+    vExit: { label: 'PVC focus → His exit', unit: 'ms', adv: true, what: 'ectopic focus → exit into the His–Purkinje system (retrograde)' },
+    ectopicVA: { label: 'Ectopic retro VA (empty = concealed)', unit: 'ms', what: 'ectopic QRS onset → retrograde P; empty = the wave dies in the AV node' },
+    wideQrsMs: { label: 'Wide QRS from', unit: 'ms', adv: true, what: 'a QRS at least this wide, with no bundle-branch block marked, is drawn as ventricular' },
+    fWaveMs: { label: 'F–F override (empty = from your F marks)', unit: 'ms', adv: true, what: 'fixed F–F cycle instead of the one fitted to your F marks' },
+    fPhaseMs: { label: 'F phase override (one F at)', unit: 'ms', adv: true, what: 'time of one F wave, to shift the fitted F waves' },
+    fibMeanMs: { label: 'Mean f–f cycle', unit: 'ms', what: 'spacing of the schematic f waves' },
+    concealDepth: { label: 'Concealed depth (0–1)', unit: '', adv: true, what: 'how far into the AV node a concealed retrograde wave is drawn' },
+    blockDepth: { label: 'Block depth (0–1)', unit: '', adv: true, what: 'how far into the AV node a blocked P is drawn' },
+    blockBelowHis: { label: 'Block below the His (0 = AV node, 1 = infra-His)', unit: '', what: 'where complete block sits: 0 = AV node (junctional escape), 1 = below the His (ventricular escape)' },
+    jtNodeMs: { label: 'Focus → His (in the node)', unit: 'ms', adv: true, what: 'junctional focus → His entry' },
+    apAnteMs: { label: 'Pathway conduction (atrial end → delta wave)', unit: 'ms', what: 'atrial end of the pathway → delta wave: the pre-excited descent' },
+    vhMs: { label: 'QRS onset → retrograde His (through ventricular muscle)', unit: 'ms', adv: true, what: 'QRS onset → retrograde His: the slow return through ventricular muscle' },
+    hPrimeLead: { label: 'H′ before the P reaches the node', unit: 'ms', what: 'how long before the P reaches the node the hidden H′ fires' },
 };
 
 const ALWAYS = ['SACT', 'PA', 'HV', 'AHmin', 'PRmin', 'PRmax', 'wideQrsMs', 'concealDepth', 'blockDepth'];
@@ -160,6 +160,7 @@ export const MECHANISMS = [
     { id: 'hisExtra', label: 'Concealed His extrasystoles (pseudo AV block)', params: [...ALWAYS, 'hPrimeLead'] },
     { id: 'avnrt', label: 'AVNRT — typical / atypical by VA', params: [...ALWAYS, 'VA'] },
     { id: 'avrt', label: 'Orthodromic AVRT (accessory pathway)', params: [...ALWAYS, 'VA', 'apVdelay', 'apToAV'] },
+    { id: 'pjrt', label: 'PJRT (orthodromic AVRT over a slow, decremental pathway — long RP)', params: [...ALWAYS, 'VA', 'apVdelay', 'apToAV'] },
     { id: 'avrtAnti', label: 'Antidromic AVRT (anterograde over the pathway)', params: [...ALWAYS, 'VA', 'apAnteMs', 'vhMs'] },
     { id: 'at', label: 'Atrial tachycardia (atrial focus)', params: ALWAYS },
     { id: 'jt', label: 'Junctional tachycardia (nodal focus)', params: [...ALWAYS, 'VA', 'jtNodeMs'] },
@@ -870,7 +871,7 @@ function buildAvnrt(B, input) {
  * Orthodromic AVRT: down the AV node and His, up an accessory pathway, from
  * the ventricular end (QRS onset + apVdelay) to the atrial end (QRS onset + VA).
  */
-function buildAvrt(B, input) {
+function buildAvrt(B, input, { pjrt = false } = {}) {
     const { P } = B;
     const beats = input.beats.slice().sort(byQ);
     if (!beats.length) return;
@@ -880,7 +881,7 @@ function buildAvrt(B, input) {
     const lows = beats.map(b => junctionTimes(B, b.qrsOnMs).tAvOut);
     const ah = beats.map((b, i) => i > 0 ? lows[i] - (tA[i - 1] + P.apToAV) : NaN);
     const medAH = median(ah.filter(Number.isFinite)) ?? 150;
-    const longRP = rr && VA > rr / 2;
+    const longRP = pjrt || (rr && VA > rr / 2);
 
     beats.forEach((b, i) => {
         const tLow = lows[i];
@@ -891,9 +892,12 @@ function buildAvrt(B, input) {
         atrialRetro(B, tA[i], { beatId: b.id });
     });
     B.L.intervals = measureIntervals(beats, [], new Map(), P).map(iv => ({ ...iv, VAms: VA }));
+    const rpLong = rr && VA > rr / 2;
     if (VA < 70) B.note(`VA ${VA} ms < 70 ms: too short for orthodromic AVRT (the ventricle and the pathway must be activated first) — typical AVNRT is more likely.`, 'warning', 'va-too-short-for-ap');
+    else if (pjrt) B.note(`PJRT, VA ${VA} ms: antegrade AV node → His → V, retrograde over a slowly conducting, decremental accessory pathway (drawn wavy).`);
     else B.note(`Orthodromic AVRT, VA ${VA} ms: antegrade AV node → His → V, retrograde over the accessory pathway (AP).`);
-    if (longRP) B.note(`Long RP (VA > RR/2): slow, decremental pathway (PJRT) — AP drawn wavy.`);
+    if (pjrt && rr && !rpLong) B.note(`PJRT has a long RP; here VA ${VA} ms ≤ RR/2 (${Math.round(rr / 2)} ms).`, 'caution', 'pjrt-short-rp');
+    if (!pjrt && rpLong) B.note(`Long RP (VA ${VA} ms > RR/2): a fast accessory pathway returns early — a long-RP orthodromic tachycardia is PJRT (choose that reading).`, 'warning', 'long-rp-not-avrt');
 }
 
 /** Atrial fibrillation: schematic f waves; one conducts per QRS, the rest are concealed. */
@@ -1131,7 +1135,8 @@ const RULES = {
     hisExtra: buildHisExtra,
     avb3: buildAvb3,
     avnrt: buildAvnrt,
-    avrt: buildAvrt,
+    avrt: (B, input) => buildAvrt(B, input),
+    pjrt: (B, input) => buildAvrt(B, input, { pjrt: true }),
     afib: buildAfib,
     flutter: buildFlutter,
 };

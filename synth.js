@@ -262,7 +262,7 @@ export const SYNTH_SCENARIOS = [
     { id: 'svtShortRP', label: 'Short-RP narrow-QRS tachycardia (RP 80 ms)', expect: 'avnrt',
       hint: 'CL 360 ms, RP 80, PR 280: the retrograde P is the notch just after the QRS (pseudo-S in II, pseudo-r′ in V1). Compatible with AVNRT, orthodromic AVRT, atrial tachycardia with 1st-degree block and junctional tachycardia.',
       timeline: () => tachyTrain({ cl: 360, rp: 80, dur: 4200 }) },
-    { id: 'svtLongRP', label: 'Long-RP narrow-QRS tachycardia (RP 270 ms)', expect: 'avrt',
+    { id: 'svtLongRP', label: 'Long-RP narrow-QRS tachycardia (RP 270 ms)', expect: 'pjrt',
       hint: 'CL 460 ms (130 /min), RP 270, PR 190: a deep negative P in II/III/aVF in diastole, right after a small T. Compatible with PJRT, fast–slow AVNRT and atrial tachycardia.',
       timeline: () => tachyTrain({ cl: 460, rp: 270, dur: 5000 }) },
     { id: 'wideTachy1to1', label: 'Wide-QRS tachycardia with 1:1 VA (RP 210 ms)', expect: 'vt',

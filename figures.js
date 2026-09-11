@@ -48,7 +48,7 @@ export const FIGURES = [
         id: 'fig2', file: 'LLD_Figure2_longRP_narrowQRS_tachycardia', scenario: 'svtLongRP',
         title: 'Figure 2. Candidate mechanisms of long-RP narrow-QRS tachycardia (same tracing, three readings)',
         panels: [
-            { mechanism: 'avrt', tiers: ['A', 'AV', 'His', 'V'], params: { VA: 270, apVdelay: 35 }, title: 'Permanent junctional reciprocating tachycardia',
+            { mechanism: 'pjrt', tiers: ['A', 'AV', 'His', 'V'], params: { VA: 270, apVdelay: 35 }, title: 'Permanent junctional reciprocating tachycardia',
               caption: 'Orthodromic circuit whose retrograde limb is a concealed, slowly and decrementally conducting pathway (wavy AP).' },
             { mechanism: 'avnrt', tiers: ['A', 'AV', 'His', 'V'], params: { VA: 270 }, title: 'Atypical (fast–slow) AVNRT',
               caption: 'Down the fast pathway (steep), back up the slow one (shallow), both between the AV and His lines: the long RP is retrograde nodal conduction.' },
