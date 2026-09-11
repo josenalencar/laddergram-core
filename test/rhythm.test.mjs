@@ -129,6 +129,16 @@ for (const sc of SYNTH_SCENARIOS) {
     else ok(`${sc.id} (detector): suggested ${s.id} (expected ${sc.expect})`, s.id === sc.expect);
 }
 
+{
+    // bigeminy: the sinus P that falls after each PVC keeps the sinus rhythm — blocked, not retrograde
+    const { beats, atrial } = truthMarks('pvcBigeminy');
+    ok('bigeminy: the P after the PVC is the sinus P, not a retrograde one', plausibleParams('pvc', beats, atrial).params.ectopicVA == null);
+    // a real retrograde P after a PVC (off the sinus rhythm) is still measured
+    const B = [{ id: 'b0', qrsOnMs: 400, qrsOffMs: 490 }, { id: 'b1', qrsOnMs: 1100, qrsOffMs: 1270, quality: 'pvc' }, { id: 'b2', qrsOnMs: 2100, qrsOffMs: 2190 }];
+    const A = [{ id: 'a0', tMs: 240 }, { id: 'a1', tMs: 1260 }, { id: 'a2', tMs: 1940 }];
+    ok('a retrograde P after a PVC is measured', plausibleParams('pvc', B, A).params.ectopicVA === 160);
+}
+
 console.log('\ncontinue: jitter, both directions, groups');
 {
     // the reported case: beats 4–7 marked by hand (PR jitter up to 55 ms), then Continue

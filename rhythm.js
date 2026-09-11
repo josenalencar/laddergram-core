@@ -250,14 +250,25 @@ export function suggestReading(beats = [], atrial = [], rhythm = {}) {
 
 // ─── timings per mechanism ──────────────────────────────────────────────────
 
-/** The VA after ectopic (PVC-marked or wide) beats, when the user marked a P right after them. */
-function ectopicRetroVA(B, A) {
+/**
+ * The VA after ectopic (PVC-marked or wide) beats, when the user marked a P right after them — unless that
+ * P keeps the sinus P–P: then it is the sinus P, blocked by the ectopic beat (a compensatory pause), not a
+ * retrograde one.
+ */
+function ectopicRetroVA(B, A, PP) {
     const vas = [];
+    const onSinusGrid = (p) => {
+        if (!PP) return false;
+        const prev = A.filter(a => a.tMs < p.tMs - 100).pop();
+        if (!prev) return false;
+        const k = Math.round((p.tMs - prev.tMs) / PP);
+        return k >= 1 && Math.abs(p.tMs - prev.tMs - k * PP) <= 0.12 * PP;
+    };
     B.forEach((b, i) => {
         if (!(ectopic(b) || width(b) >= WIDE_QRS_MS)) return;
         const next = B[i + 1]?.qrsOnMs ?? Infinity;
         const p = A.find(a => a.tMs >= b.qrsOnMs + 20 && a.tMs < Math.min(next, b.qrsOnMs + 450));
-        if (p) vas.push(p.tMs - b.qrsOnMs);
+        if (p && !onSinusGrid(p)) vas.push(p.tMs - b.qrsOnMs);
     });
     return vas.length ? { VA: Math.round(median(vas)), n: vas.length } : null;
 }
@@ -306,9 +317,9 @@ export function plausibleParams(mechanism, beats = [], atrial = []) {
         }
         case 'pvc':
         case 'avnodal': {
-            const e = ectopicRetroVA(B, A);
+            const e = ectopicRetroVA(B, A, m.ppCV != null && m.ppCV <= 0.12 ? m.PP : null);
             if (e) set('ectopicVA', e.VA, 'measured', `a P right after ${e.n} ectopic beat(s): retrograde VA from your marks`);
-            else if (B.some(b => ectopic(b) || width(b) >= WIDE_QRS_MS)) set('ectopicVA', null, 'typical', 'no P right after the ectopic beats: the retrograde wave is concealed in the AV node');
+            else if (B.some(b => ectopic(b) || width(b) >= WIDE_QRS_MS)) set('ectopicVA', null, 'typical', 'no retrograde P after the ectopic beats (a P on the sinus rhythm is the sinus P, blocked): the retrograde wave is concealed in the AV node');
             break;
         }
         case 'avb3': {
