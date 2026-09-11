@@ -13,7 +13,7 @@ drawing: change a mark or a parameter and the ladder is rebuilt.
 | File | What it holds |
 |---|---|
 | `engine.js` | `buildLadder`, mechanisms, tiers, default intervals with normal ranges and references, `claims` (notes with a level and a code), stable element keys, `ENGINE_VERSION` |
-| `detect.js` | `detectMarks(signal)`: automatic P and QRS onsets (and ectopic QRS) from a signal JSON — for the editor's Import ECG and the planned digitizer; every mark is meant to be checked |
+| `detect.js` | `detectMarks(signal)`: automatic QRS onsets (ectopic = wide *and* differently shaped) and P onsets in three passes — before each QRS, locked after it (retrograde / blocked 2:1 P) and on their own regular grid (dissociated / blocked P); calibration pulse and saturated tail ignored. Every mark is meant to be checked |
 | `rhythm.js` | What the marks say before any ladder is drawn: `measureRhythm` (RR, QRS width, A:V relation, RP / PR), `plausibility` (readings the marks rule out or make unlikely, with the reason), `suggestReading` (a first reading that is never ruled out), `plausibleParams` (per-mechanism timings, measured from the marks or typical), `continueRhythm` (extend 2–3 marked beats and their P waves to both ends of the strip; one P per position learned from the complete cycles) |
 | `export.js` | `layoutLadder` (one ladder → editor points/connections), `toLewisLadderDiagram`, `toLineStyle`, the generator's own JSON |
 | `synth.js` | synthetic 12-lead ECGs with a known timeline (teaching examples, test fixtures) |

@@ -193,6 +193,7 @@ export function rhythmSummary(m) {
     if (m.nBeats < 2) return 'Mark at least two QRS onsets.';
     const parts = [`${m.regularity === 'unknown' ? '' : m.regularity + ' '}${m.wide ? 'wide' : 'narrow'}-QRS rhythm, ${m.rate}/min`];
     if (m.relation === 'none') parts.push('no P marked');
+    else if (m.relation === '1:1' && !m.tachy) parts.push(`a P before each QRS, PR ${m.PR} ms`);
     else if (m.relation === '1:1') parts.push(`1:1, RP ${m.RP} / PR ${m.PR} ms (${{ veryShort: 'RP ≤ 70 ms', short: 'short RP', long: 'long RP' }[m.rpClass]})`);
     else if (m.relation === 'A>V') parts.push(`more P than QRS (${m.pPerCycle}:1)`);
     else if (m.relation === 'V>A') parts.push('more QRS than P');
@@ -220,7 +221,7 @@ export function suggestReading(beats = [], atrial = [], rhythm = {}) {
         s = m.rpClass === 'veryShort' ? pick(['avnrt', 'jt'], `RP ${m.RP} ms ≤ 70: typical AVNRT (orthodromic AVRT is excluded)`)
           : m.rpClass === 'short' ? pick(['avrt', 'at', 'avnrt'], `short RP (${m.RP} ms > 70): orthodromic AVRT favoured — AT and slow–slow AVNRT remain`)
           : pick(['at', 'avnrt', 'pjrt'], `long RP (RP ${m.RP} > PR ${m.PR}): atrial tachycardia, atypical AVNRT or PJRT`);
-    } else if (m.tachy && m.relation === 'none' && m.regularity !== 'irregular') {
+    } else if (m.tachy && (m.relation === 'none' || m.nP < Math.max(2, 0.3 * m.nBeats)) && m.regularity !== 'irregular') {
         s = pick(['avnrt'], 'regular narrow tachycardia with no P visible — likely hidden in the QRS (typical AVNRT); mark a retrograde P if you see one');
     } else if (m.relation === 'A>V' && flutterLike && 60000 / m.PP >= 240) {
         s = pick(['flutter'], `regular atrial waves every ${m.PP} ms (${Math.round(60000 / m.PP)}/min) — atrial flutter with ${Math.round(m.pPerCycle)}:1 conduction`);
