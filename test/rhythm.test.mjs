@@ -10,7 +10,9 @@ const W = { normal: 90, pvc: 150, wide: 150, capture: 90, fusion: 120 };
 function truthMarks(id) {
     const tr = makeExample(id).metadata.truth;
     const beats = tr.QRS.map((q, i) => ({ id: 'b' + i, qrsOnMs: q.t, qrsOffMs: q.t + (W[q.morph] ?? 140), quality: q.morph === 'pvc' ? 'pvc' : 'normal' }));
-    const atrial = tr.P.map((p, i) => ({ id: 'a' + i, tMs: p.t }));
+    let atrial = tr.P.map((p, i) => ({ id: 'a' + i, tMs: p.t }));
+    // flutter: the F-wave onsets are the atrial marks
+    if (tr.flutter) { atrial = []; for (let t = tr.flutter.phaseMs; t < tr.durationMs; t += tr.flutter.cycleMs) atrial.push({ id: 'f' + atrial.length, tMs: t }); }
     return { tr, beats, atrial };
 }
 
@@ -101,6 +103,73 @@ for (const id of ['sinus', 'avb1', 'normalSinus', 'avnrt', 'avrt', 'svtShortRP',
         const hitP = atrial.filter(a => c.atrial.some(x => Math.abs(x.tMs - a.tMs) <= 40)).length;
         ok(`${id}, all QRS known: no QRS added, P ${hitP}/${atrial.length}`, c.added.beats.length === 0 && hitP >= atrial.length - 2);
     }
+}
+
+console.log('\nthe suggestion is the scenario\'s reading (ambiguous strips: any reading not excluded)');
+const AMBIGUOUS = { svtShortRP: ['avnrt', 'avrt', 'at', 'jt'], svtLongRP: ['pjrt', 'at', 'avnrt'], apparentChb: ['avb3', 'hisExtra', 'avnodal'] };
+for (const sc of SYNTH_SCENARIOS) {
+    const { tr, beats, atrial } = truthMarks(sc.id);
+    const s = suggestReading(beats, atrial, tr.af ? { afib: true } : {});
+    if (AMBIGUOUS[sc.id]) ok(`${sc.id}: ${s.id} is one of ${AMBIGUOUS[sc.id].join('/')}`, AMBIGUOUS[sc.id].includes(s.id));
+    else ok(`${sc.id}: suggested ${s.id} (expected ${sc.expect})`, s.id === sc.expect);
+    if (!tr.af) ok(`${sc.id}: a false automatic AF call is vetoed`, suggestReading(beats, atrial, { afib: true }).id === s.id);
+}
+ok('wenckebach: not dissociated', !R('wenckebach').dissociated);
+ok('chbVent: wide and dissociated', R('chbVent').wide && R('chbVent').dissociated);
+ok('pvcBigeminy: regular groups of 2', R('pvcBigeminy').rrPeriod === 2 && R('pvcBigeminy').afVeto);
+
+console.log('\ncontinue: jitter, both directions, groups');
+{
+    // the reported case: beats 4–7 marked by hand (PR jitter up to 55 ms), then Continue
+    const { tr, beats, atrial } = truthMarks('sinus');
+    const jit = [0, 55, -50, 45];
+    const B0 = beats.slice(3, 7), A0 = B0.map((b, i) => ({ id: 'j' + i, tMs: atrial.find(a => a.tMs < b.qrsOnMs && a.tMs > b.qrsOnMs - 400).tMs + jit[i] }));
+    const c = continueRhythm(B0, A0, tr.durationMs, { fromMs: 0 });
+    const perBeat = c.beats.map(b => c.atrial.filter(a => a.tMs < b.qrsOnMs - 20 && a.tMs > b.qrsOnMs - 400).length);
+    ok(`sinus beats 4–7 with jitter: one P before every QRS (${perBeat.join('')})`, perBeat.every(x => x === 1));
+    const hitQ = beats.filter(b => c.beats.some(x => Math.abs(x.qrsOnMs - b.qrsOnMs) <= 30)).length;
+    ok(`sinus beats 4–7: all QRS both ways (${hitQ}/${beats.length})`, hitQ >= beats.length - 1);
+    ok('sinus beats 4–7: beats added before the first mark', c.added.beats.some(b => b.qrsOnMs < B0[0].qrsOnMs));
+    const hitP = atrial.filter(a => c.atrial.some(x => Math.abs(x.tMs - a.tMs) <= 60)).length;
+    ok(`sinus beats 4–7: P within 60 ms (${hitP}/${atrial.length})`, hitP >= atrial.length - 1);
+}
+{
+    const { tr, beats, atrial } = truthMarks('svtLongRP');
+    const B0 = beats.slice(3, 7), A0 = atrial.filter(a => a.tMs > B0[0].qrsOnMs && a.tMs < B0[3].qrsOnMs + 300);
+    const c = continueRhythm(B0, A0, tr.durationMs, { fromMs: 0 });
+    const perCycle = c.beats.slice(0, -1).map((b, i) => c.atrial.filter(a => a.tMs >= b.qrsOnMs && a.tMs < c.beats[i + 1].qrsOnMs).length);
+    ok(`long RP beats 4–7: exactly one P per cycle (${perCycle.join('')})`, perCycle.every(x => x === 1));
+}
+{
+    const { tr, beats, atrial } = truthMarks('twoToOne');
+    const B0 = beats.slice(1, 4), A0 = atrial.filter(a => a.tMs > B0[0].qrsOnMs - 700 && a.tMs < B0[2].qrsOnMs);
+    const c = continueRhythm(B0, A0, tr.durationMs, { fromMs: 0 });
+    const hitP = atrial.filter(a => c.atrial.some(x => Math.abs(x.tMs - a.tMs) <= 40)).length;
+    const extra = c.atrial.filter(x => !atrial.some(a => Math.abs(x.tMs - a.tMs) <= 40)).length;
+    ok(`2:1 from beats 2–4: P ${hitP}/${atrial.length}, ${extra} extra`, hitP >= atrial.length - 1 && extra <= 1);
+}
+{
+    const { tr, beats, atrial } = truthMarks('pvcBigeminy');
+    const B0 = beats.slice(2, 6), A0 = atrial.filter(a => a.tMs > B0[0].qrsOnMs - 400 && a.tMs < B0[3].qrsOnMs);
+    const c = continueRhythm(B0, A0, tr.durationMs, { fromMs: 0 });
+    const hitQ = beats.filter(b => c.beats.some(x => Math.abs(x.qrsOnMs - b.qrsOnMs) <= 30 && (x.quality === 'pvc') === (b.quality === 'pvc'))).length;
+    ok(`bigeminy from beats 3–6: QRS both ways with the right kind (${hitQ}/${beats.length})`, hitQ >= beats.length - 1);
+}
+{
+    const { tr, beats, atrial } = truthMarks('chb');
+    const B0 = beats.slice(1, 4), A0 = atrial.filter(a => a.tMs > B0[0].qrsOnMs - 200 && a.tMs < B0[2].qrsOnMs);
+    const c = continueRhythm(B0, A0, tr.durationMs, { fromMs: 0 });
+    const hitP = atrial.filter(a => c.atrial.some(x => Math.abs(x.tMs - a.tMs) <= 40)).length;
+    ok(`complete block: P at their own rate both ways (${hitP}/${atrial.length})`, hitP >= atrial.length - 1 && c.p?.mode === 'own-rate');
+}
+{
+    // the editor's time axis starts before 0 when the first grid click is not at the left edge
+    const { beats, atrial } = truthMarks('sinus');
+    const sh = (t) => t - 1200;
+    const B0 = beats.slice(3, 6).map(b => ({ ...b, qrsOnMs: sh(b.qrsOnMs), qrsOffMs: sh(b.qrsOffMs) }));
+    const A0 = atrial.filter(a => a.tMs > beats[3].qrsOnMs - 400 && a.tMs < beats[5].qrsOnMs).map(a => ({ ...a, tMs: sh(a.tMs) }));
+    const c = continueRhythm(B0, A0, 8000, { fromMs: -1200 });
+    ok('negative start: continued back to the first beat of the strip', Math.min(...c.beats.map(b => b.qrsOnMs)) < sh(beats[1].qrsOnMs) + 30);
 }
 
 console.log(`\n${pass} ok, ${fail} fail`);

@@ -37,16 +37,23 @@ export function measureRhythm(beats = [], atrial = []) {
     const n = B.length;
     const rrAll = B.slice(1).map((b, i) => b.qrsOnMs - B[i].qrsOnMs);
     const rrN = B.slice(1).map((b, i) => (!ectopic(b) && !ectopic(B[i]) ? b.qrsOnMs - B[i].qrsOnMs : null)).filter(x => x != null);
-    const rr = rrN.length ? rrN : rrAll;
+    const rr = rrN.length >= 2 ? rrN : rrAll;
     const RR = median(rr);
-    const rrCV = cv(rr);
+    // a repeating group (bigeminy, trigeminy) is regular in its groups even though its RR alternates
+    const pat = n >= 3 ? beatPattern(B) : null;
+    const rrPeriod = pat ? pat.k : null;
+    const groupCV = rrPeriod && rrPeriod > 1 && rrAll.length > rrPeriod
+        ? cv(rrAll.slice(0, rrAll.length - rrPeriod + 1).map((_, i) => rrAll.slice(i, i + rrPeriod).reduce((a, x) => a + x, 0))) : null;
+    const rrCV = groupCV ?? cv(rr);
     const regularity = rr.length < 2 ? 'unknown' : rrCV <= 0.08 ? 'regular' : rrCV >= 0.15 ? 'irregular' : 'variable';
-    const widths = B.filter(b => !ectopic(b)).map(width);
-    const qrsMs = median(widths.length ? widths : B.map(width));
+    const qrsMs = median(B.map(width));
     const wideShare = n ? B.filter(b => width(b) >= WIDE_QRS_MS).length / n : 0;
+    // a strip where every beat is marked ectopic (VT, a ventricular escape rhythm) is read as its own rhythm
+    const ect = B.length && B.every(ectopic) ? () => false : ectopic;
     const out = {
         nBeats: n, nP: A.length, RR: round(RR), rate: RR ? Math.round(60000 / RR) : null, rrCV: +rrCV.toFixed(3), regularity,
-        qrsMs: round(qrsMs), wide: wideShare >= 0.6, wideShare: +wideShare.toFixed(2), anyEctopic: B.some(ectopic),
+        qrsMs: round(qrsMs), wide: wideShare >= 0.6, wideShare: +wideShare.toFixed(2), anyEctopic: B.some(ectopic) && !B.every(ectopic),
+        rrPeriod, afVeto: false, pqSweep: null,
         tachy: RR != null && RR < TACHY_RR_MS,
         relation: A.length ? 'unknown' : 'none', RP: null, PR: null, rpClass: null, rpSD: null, pPerCycle: null,
         PP: null, ppCV: null, prFixed: false, prSD: null, dissociated: false, coveredCycles: 0,
@@ -55,13 +62,14 @@ export function measureRhythm(beats = [], atrial = []) {
         const pp = A.slice(1).map((a, i) => a.tMs - A[i].tMs);
         out.PP = round(median(pp)); out.ppCV = +cv(pp).toFixed(3);
     }
+    out.afVeto = out.anyEctopic || (rrPeriod != null && rrPeriod >= 2) || regularity === 'regular';
     if (!A.length || n < 2) return out;
 
     // P waves per QRS cycle [qrs_k − 20, qrs_{k+1} − 20): a P inside the QRS counts as RP ≈ 0.
     const first = A[0].tMs, last = A[A.length - 1].tMs;
     const cycles = [];
     for (let k = 0; k < n - 1; k++) {
-        if (ectopic(B[k]) || ectopic(B[k + 1])) continue;
+        if (ect(B[k]) || ect(B[k + 1])) continue;
         const t0 = B[k].qrsOnMs - 20, t1 = B[k + 1].qrsOnMs - 20;
         if (t1 < first - 20 || t0 > last + 20) continue;           // the user did not mark P waves here
         const ps = A.filter(a => a.tMs >= t0 && a.tMs < t1);
@@ -76,9 +84,18 @@ export function measureRhythm(beats = [], atrial = []) {
     // PR of the P that conducted each QRS (nearest preceding P in the pairing window)
     const { pairs } = pairAtrialToBeats(B, A, DEFAULT_PARAMS);
     const aT = new Map(A.map(a => [a.id, a.tMs]));
-    const prs = B.filter(b => !ectopic(b) && pairs.has(b.id)).map(b => b.qrsOnMs - aT.get(pairs.get(b.id)));
+    const prs = B.filter(b => !ect(b) && pairs.has(b.id)).map(b => b.qrsOnMs - aT.get(pairs.get(b.id)));
     out.prSD = prs.length >= 2 ? Math.round(sd(prs)) : null;
-    out.prFixed = prs.length >= 2 && out.prSD <= 25 && prs.length >= 0.8 * B.filter(b => !ectopic(b)).length;
+    out.prFixed = prs.length >= 2 && out.prSD <= 25 && prs.length >= 0.8 * B.filter(b => !ect(b)).length;
+    // how far the P-to-next-QRS interval wanders, over the P waves followed by a QRS before the next P:
+    // in complete block / dissociation it sweeps the whole cycle; in Wenckebach it stays within the PR range
+    const dq = [];
+    A.forEach((a, i) => {
+        const q = B.find(b => b.qrsOnMs > a.tMs + 20);
+        const nextP = A[i + 1]?.tMs ?? Infinity;
+        if (q && q.qrsOnMs < nextP) dq.push(q.qrsOnMs - a.tMs);
+    });
+    out.pqSweep = dq.length >= 3 ? Math.round(Math.max(...dq) - Math.min(...dq)) : null;
 
     if (ones.length >= 0.8 * cycles.length) {
         const rps = ones.map(c => Math.max(0, c.ps[0]));
@@ -95,8 +112,14 @@ export function measureRhythm(beats = [], atrial = []) {
 
     // AV dissociation: regular P waves that keep no fixed relation to the QRS
     out.dissociated = A.length >= 3 && out.ppCV != null && out.ppCV <= 0.12 && !out.prFixed && out.relation !== '1:1'
-        && (out.relation === 'V>A' || out.relation === 'variable' || (out.prSD != null && out.prSD > 60));
+        && (out.relation === 'V>A' || out.relation === 'variable' || out.relation === 'A>V' || (out.prSD != null && out.prSD > 60))
+        && out.pqSweep != null && out.pqSweep >= 0.6 * Math.min(out.PP, RR ?? Infinity);
     if (out.dissociated && out.relation === 'variable') out.relation = 'dissociated';
+    // fibrillation has no organised P and an irregular RR: a regular RR, a repeating group, ectopy or
+    // organised P waves (regular, or one per QRS) veto an automatic AF call
+    out.afVeto = out.anyEctopic || (rrPeriod != null && rrPeriod >= 2) || regularity === 'regular'
+        || out.relation === '1:1' || out.dissociated || (A.length >= 3 && out.ppCV != null && out.ppCV <= 0.15)
+        || (out.pPerCycle != null && out.pPerCycle >= 0.8 && out.pPerCycle <= 1.3);
     return out;
 }
 
@@ -183,22 +206,27 @@ export function rhythmSummary(m) {
  * `rhythm.afib` (the viewer's automatic AF gate) wins.
  */
 export function suggestReading(beats = [], atrial = [], rhythm = {}) {
-    if (rhythm.afib) return { id: 'afib', reason: 'irregularly irregular RR without organised P — detected automatically' };
     const { rhythm: m, verdicts } = plausibility(beats, atrial);
     const ok = (id) => verdicts[id] && verdicts[id].status !== 'excluded';
     const pick = (ids, reason) => { const id = ids.find(ok); return id ? { id, reason } : null; };
+    const flutterLike = m.relation !== 'none' && m.nP >= 3 && m.ppCV != null && m.ppCV <= 0.1 && m.PP >= 160 && m.PP <= 350;
     let s = null;
-    if (m.tachy && m.wide && !m.anyEctopic) s = pick(['vt'], 'wide-QRS tachycardia — VT until proven otherwise');
-    else if (m.tachy && m.regularity === 'irregular' && m.relation !== '1:1') s = pick(['afib'], 'irregular narrow tachycardia without a P before each QRS');
+    // an automatic AF call (the viewer's gate) yields to ectopy, a bigeminal pattern or 1:1 P waves
+    if (rhythm.afib && !m.afVeto) s = pick(['afib'], 'irregularly irregular RR without organised P — detected automatically');
+    else if (m.tachy && m.wide) s = pick(['vt'], 'wide-QRS tachycardia — VT until proven otherwise');
+    else if (m.dissociated && m.RR && m.PP && m.RR > m.PP) s = pick(['avb3'], 'regular P waves unrelated to a slower QRS — complete AV block?');
+    else if (m.tachy && m.regularity === 'irregular' && m.relation !== '1:1' && !m.afVeto && !flutterLike) s = pick(['afib'], 'irregular narrow tachycardia without a P before each QRS');
     else if (m.tachy && m.relation === '1:1') {
         s = m.rpClass === 'veryShort' ? pick(['avnrt', 'jt'], `RP ${m.RP} ms ≤ 70: typical AVNRT (orthodromic AVRT is excluded)`)
           : m.rpClass === 'short' ? pick(['avrt', 'at', 'avnrt'], `short RP (${m.RP} ms > 70): orthodromic AVRT favoured — AT and slow–slow AVNRT remain`)
           : pick(['at', 'avnrt', 'pjrt'], `long RP (RP ${m.RP} > PR ${m.PR}): atrial tachycardia, atypical AVNRT or PJRT`);
     } else if (m.tachy && m.relation === 'none' && m.regularity !== 'irregular') {
         s = pick(['avnrt'], 'regular narrow tachycardia with no P visible — likely hidden in the QRS (typical AVNRT); mark a retrograde P if you see one');
-    } else if (m.tachy && m.relation === 'A>V') s = pick(['flutter', 'at'], 'more atrial than ventricular activations — flutter or atrial tachycardia with AV block');
-    else if (m.dissociated && m.RR && m.PP && m.RR > m.PP) s = pick(['avb3'], 'regular P waves unrelated to a slower QRS — complete AV block?');
+    } else if (m.relation === 'A>V' && flutterLike && 60000 / m.PP >= 240) {
+        s = pick(['flutter'], `regular atrial waves every ${m.PP} ms (${Math.round(60000 / m.PP)}/min) — atrial flutter with ${Math.round(m.pPerCycle)}:1 conduction`);
+    } else if (m.tachy && m.relation === 'A>V') s = pick(['at', 'flutter'], 'more atrial than ventricular activations — atrial tachycardia or flutter with AV block');
     else if (m.anyEctopic) s = pick(['pvc'], 'ectopic beats marked');
+    else if (m.regularity === 'irregular' && m.relation === 'none' && m.nBeats >= 6 && !m.afVeto) s = pick(['afib'], 'irregularly irregular RR and no P marked');
     else if (m.relation === 'A>V') s = pick(['avnodal'], 'P waves without a QRS — AV block (Wenckebach, Mobitz II or 2:1)');
     if (!s) s = pick(['avnodal', 'at', 'jt', 'vt'], m.relation === '1:1' || m.relation === 'none' ? 'P before each QRS' : 'sinus / AV conduction');
     return s ?? { id: 'avnodal', reason: 'default reading' };
@@ -292,6 +320,7 @@ export function plausibleParams(mechanism, beats = [], atrial = []) {
 
 const DEDUP_MS = 40;
 const close = (x, y) => Math.abs(x - y) <= Math.max(40, 0.08 * Math.max(x, y));
+const mod = (i, k) => ((i % k) + k) % k;
 
 /** The shortest repeating unit of the marked beats (1 = every beat alike; 2 = bigeminy …), or null. */
 function beatPattern(B) {
@@ -306,95 +335,153 @@ function beatPattern(B) {
         const unit = q.slice(-k);
         if (k === 1 || verified >= 1 || (unit.some(Boolean) && unit.some(x => !x))) {
             const slot = Array.from({ length: k }, (_, s) => median(rr.filter((_, i) => i % k === s)));
-            return { k, rrOfInterval: (i) => slot[i % k] };
+            return { k, rrOfInterval: (i) => slot[mod(i, k)] };
         }
     }
     return null;
 }
 
 /**
- * "Continue to the end": after two or three marked beats, repeat what they show until `untilMs`.
+ * Where the P waves sit in each cycle, learned from the cycles the user marked completely.
+ * A cycle runs from one QRS onset (the anchor) to the next (−20 ms, so a P hidden in the QRS belongs
+ * to the cycle it starts). Per slot of the beat pattern, the usual number of P per cycle (the mode)
+ * wins; cycles with another count are ignored, never turned into extra P. Each position is kept either
+ * from the start of the cycle (a retrograde P: fixed RP) or from its end (a conducted P: fixed PR),
+ * whichever varies less across the marked cycles — so hand-clicked jitter makes one P, not two.
+ */
+function pPattern(cycles, k, tolOf) {
+    const bySlot = Array.from({ length: k }, () => []);
+    for (const c of cycles) bySlot[mod(c.slot, k)].push(c);
+    return bySlot.map((cs, s) => {
+        if (!cs.length) return [];
+        const freq = new Map();
+        for (const c of cs) freq.set(c.ps.length, (freq.get(c.ps.length) || 0) + 1);
+        const mode = [...freq.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
+        const use = cs.filter(c => c.ps.length === mode);
+        const pos = [];
+        for (let i = 0; i < mode; i++) {
+            const fromStart = use.map(c => c.ps[i] - c.start), fromEnd = use.map(c => c.end - c.ps[i]);
+            const spread = (a) => { const m = median(a); return median(a.map(x => Math.abs(x - m))); };
+            pos.push(spread(fromEnd) < spread(fromStart) ? { ref: 'end', off: median(fromEnd) } : { ref: 'start', off: median(fromStart) });
+        }
+        // two positions that land on the same place are one P
+        const tol = tolOf(s);
+        return pos.filter((p, i) => !pos.slice(0, i).some(q => q.ref === p.ref && Math.abs(q.off - p.off) < tol));
+    });
+}
+
+/**
+ * "Continue to the end": after two or three marked beats, repeat what they show to both ends of the strip
+ * (`fromMs` … `untilMs`; in the editor the time before the first grid click is negative).
  * QRS: the marked RR (or the repeating group — bigeminy, 3:2) goes on; an irregular RR is not continued.
  * P: each P keeps its place in the cycle (1:1, 2:1, retrograde P) — or, when the P waves are regular but
  * unrelated to the QRS (AV dissociation, flutter with variable block), they go on at their own P–P.
  * Returns the full mark lists plus what was added and a sentence saying how.
  */
-export function continueRhythm(beats = [], atrial = [], untilMs = Infinity) {
+export function continueRhythm(beats = [], atrial = [], untilMs = Infinity, { fromMs = 0 } = {}) {
     const B = beats.slice().sort(byQ), A = atrial.slice().sort(byT);
     const res = { beats: B.slice(), atrial: A.slice(), added: { beats: [], atrial: [] }, qrs: null, p: null, message: '' };
     if (B.length < 2 && A.length < 2) { res.message = 'Mark at least two QRS onsets (and the P waves of those beats) first.'; return res; }
     const msgs = [];
+    const r1 = (t) => Math.round(t * 10) / 10;
 
-    // QRS
+    // QRS — `all` holds every beat with its index in the pattern (0 = the first marked beat)
     const pat = B.length >= 2 ? beatPattern(B) : null;
     const rrMed = median(B.slice(1).map((b, i) => b.qrsOnMs - B[i].qrsOnMs));
-    // every QRS already marked (the viewer's delineator finds them all): only the P waves need continuing
     const reachesEnd = B.length >= 2 && B[B.length - 1].qrsOnMs + 1.5 * rrMed >= untilMs;
-    const all = B.slice();
+    const reachesStart = B.length >= 2 && B[0].qrsOnMs - 1.5 * rrMed <= fromMs;
+    const k = pat ? pat.k : 1;
+    const rrOf = pat ? pat.rrOfInterval : () => rrMed;
+    let all = B.map((b, i) => ({ b, idx: i }));
+    let before = 0;
     if (pat) {
         const n = B.length;
         const widthOf = (ect) => median(B.filter(b => ectopic(b) === ect).map(width)) ?? 90;
-        for (let j = n; ; j++) {
-            const t = all[j - 1].qrsOnMs + pat.rrOfInterval(j - 1);
-            if (!(t + 40 <= untilMs)) break;
-            const src = all[j - pat.k];
+        const make = (t, idx) => {
+            const src = B[mod(idx, k)];
             const w = widthOf(ectopic(src));
-            const nb = { id: `c${Math.round(t)}`, qrsOnMs: Math.round(t * 10) / 10, qrsOffMs: Math.round((t + w) * 10) / 10, qrsWidthMs: Math.round(w),
+            const nb = { id: `c${Math.round(t)}`, qrsOnMs: r1(t), qrsOffMs: r1(t + w), qrsWidthMs: Math.round(w),
                          rPeakMs: Math.round(t + 40), quality: src.quality === 'pvc' ? 'pvc' : 'normal', source: 'user' };
-            all.push(nb); res.added.beats.push(nb);
+            res.added.beats.push(nb);
+            return { b: nb, idx };
+        };
+        for (let idx = n; ; idx++) {
+            const t = all[all.length - 1].b.qrsOnMs + rrOf(idx - 1);
+            if (!(t + 40 <= untilMs)) break;
+            all.push(make(t, idx));
         }
-        res.qrs = { k: pat.k, RR: Math.round(pat.rrOfInterval(n - 1)) };
-        if (res.added.beats.length) msgs.push(`${res.added.beats.length} QRS ${pat.k === 1 ? `every ${res.qrs.RR} ms` : `repeating your group of ${pat.k} beats`}`);
-    } else if (B.length >= 2 && !reachesEnd) msgs.push('the RR is irregular, so the QRS were not continued — mark them (or import the signal)');
+        for (let idx = -1; ; idx--) {
+            const t = all[0].b.qrsOnMs - rrOf(idx);
+            if (!(t >= fromMs)) break;
+            all.unshift(make(t, idx));
+            before++;
+        }
+        res.qrs = { k, RR: Math.round(rrOf(n - 1)) };
+        const nq = res.added.beats.length;
+        if (nq) msgs.push(`${nq} QRS ${k === 1 ? `every ${res.qrs.RR} ms` : `repeating your group of ${k} beats`}${before ? ` (${before} before your first beat)` : ''}`);
+    } else if (B.length >= 2 && !(reachesEnd && reachesStart)) {
+        msgs.push('the RR is irregular, so the QRS were not continued — mark them (or let the beats be found for you)');
+    }
 
     // P
-    const withP = (t) => {
-        if (!(t >= 0 && t <= untilMs)) return;
-        if (res.atrial.some(a => Math.abs(a.tMs - t) < DEDUP_MS)) return;
-        const na = { id: `c${Math.round(t)}`, tMs: Math.round(t * 10) / 10, source: 'user' };
+    const tolOf = (s) => Math.max(60, 0.12 * (rrOf(s) || rrMed || 800));
+    const withP = (t, tol) => {
+        if (!(t >= fromMs && t <= untilMs)) return;
+        if (res.atrial.some(a => Math.abs(a.tMs - t) < tol)) return;
+        const na = { id: `c${Math.round(t)}`, tMs: r1(t), source: 'user' };
         res.atrial.push(na); res.added.atrial.push(na);
     };
     if (A.length) {
         const pp = A.slice(1).map((a, i) => a.tMs - A[i].tMs);
         const ppMed = median(pp);
         const ppRegular = pp.length >= 1 && pp.every(x => Math.abs(x - ppMed) <= Math.max(30, 0.08 * ppMed));
-        const unit = pat ? Array.from({ length: pat.k }, (_, s) => pat.rrOfInterval(s)).reduce((s, x) => s + x, 0) : rrMed;
+        const unit = pat ? Array.from({ length: k }, (_, s) => rrOf(s)).reduce((s, x) => s + x, 0) : rrMed;
         const near = (r) => r >= 0.9 && Math.abs(r - Math.round(r)) <= 0.06;
-        const lockable = pat || reachesEnd;
-        const locked = lockable && (!ppRegular || A.length < 2 || near(unit / ppMed) || near(ppMed / unit));
+        const lockable = !!pat || (reachesEnd && reachesStart);
+        const locked = lockable && B.length >= 2 && (!ppRegular || A.length < 2 || near(unit / ppMed) || near(ppMed / unit));
         if (locked) {
-            // each P keeps its place in the cycle of the beat before it (the P before the first QRS: in the virtual cycle before);
-            // with an irregular RR and every QRS marked, each P keeps its distance to the NEAREST QRS instead
-            const k = pat ? pat.k : 1;
-            const rrOf = pat ? pat.rrOfInterval : () => rrMed;
-            const anchorOf = pat
-                ? (t) => { let i = -1; for (let j = 0; j < B.length; j++) if (B[j].qrsOnMs <= t + 20) i = j; return i; }
-                : (t) => B.reduce((bi, b, j) => (Math.abs(b.qrsOnMs - t) < Math.abs(B[bi].qrsOnMs - t) ? j : bi), 0);
-            const clusters = Array.from({ length: k }, () => []);
-            let maxIdx = -1;
-            for (const a of A) {
-                let i = anchorOf(a.tMs), off;
-                if (i < 0) { i = -1; off = a.tMs - (B[0].qrsOnMs - rrOf(((-1 % k) + k) % k)); }
-                else off = a.tMs - B[i].qrsOnMs;
-                maxIdx = Math.max(maxIdx, i);
-                const s = ((i % k) + k) % k;
-                const c = clusters[s].find(c => Math.abs(median(c) - off) <= DEDUP_MS);
-                if (c) c.push(off); else clusters[s].push([off]);
+            // The cycles the user marked. A cycle is complete when it lies inside the span of the marked P waves
+            // (± half a cycle): edge cycles the user only half marked would otherwise vote for the wrong count.
+            const firstP = A[0].tMs, lastP = A[A.length - 1].tMs;
+            const cand = [];
+            for (let j = -1; j < B.length; j++) {
+                const start = j === -1 ? B[0].qrsOnMs - rrOf(-1) : B[j].qrsOnMs;
+                const end = j + 1 < B.length ? B[j + 1].qrsOnMs : start + rrOf(j);
+                const lo = start - 20, hi = end - 20, half = 0.5 * (end - start);
+                const ps = A.filter(a => a.tMs >= lo && a.tMs < hi).map(a => a.tMs);
+                if (!ps.length && (hi < firstP - 20 || lo > lastP + 20)) continue;     // no P were marked around here
+                if (!ps.length && (j === -1 || j === B.length - 1)) continue;          // open ends: nothing to learn
+                cand.push({ slot: j, start, end, ps, complete: lo >= firstP - half && hi <= lastP + half });
             }
-            for (let j = Math.max(0, maxIdx + 1); j < all.length; j++) {
-                for (const c of clusters[j % k]) withP(all[j].qrsOnMs + median(c));
+            const full = cand.filter(c => c.complete);
+            const cycles = full.length ? full : cand.filter(c => c.ps.length);
+            const pattern = pPattern(cycles, k, tolOf);
+            // every cycle of the strip, marked beats and continued ones, and the one before the first beat
+            // (the open cycles before the first beat and after the last are only known when the RR is continued)
+            const anchors = all.map((x, i) => ({ start: x.b.qrsOnMs, end: all[i + 1] ? all[i + 1].b.qrsOnMs : x.b.qrsOnMs + rrOf(x.idx), slot: x.idx, open: !all[i + 1] }));
+            anchors.unshift({ start: all[0].b.qrsOnMs - rrOf(all[0].idx - 1), end: all[0].b.qrsOnMs, slot: all[0].idx - 1, open: true });
+            if (!pat) for (let i = anchors.length - 1; i >= 0; i--) if (anchors[i].open) anchors.splice(i, 1);
+            for (const c of anchors) {
+                const s = mod(c.slot, k);
+                for (const p of pattern[s]) {
+                    const t = p.ref === 'start' ? c.start + p.off : c.end - p.off;
+                    if (t < c.start - 20 || t >= c.end - 20 + 1e-6) continue;
+                    withP(t, tolOf(s));
+                }
             }
             res.p = { mode: 'locked' };
             if (res.added.atrial.length) msgs.push(`${res.added.atrial.length} P at the same place in each cycle`);
         } else if (ppRegular && A.length >= 2) {
-            for (let t = A[A.length - 1].tMs + ppMed; t <= untilMs; t += ppMed) withP(t);
+            const tol = Math.min(DEDUP_MS, 0.25 * ppMed);
+            for (let t = A[A.length - 1].tMs + ppMed; t <= untilMs; t += ppMed) withP(t, tol);
+            for (let t = A[0].tMs - ppMed; t >= fromMs; t -= ppMed) withP(t, tol);
             res.p = { mode: 'own-rate', PP: Math.round(ppMed) };
             if (res.added.atrial.length) msgs.push(`${res.added.atrial.length} P every ${Math.round(ppMed)} ms, at their own rate (not tied to the QRS)`);
         } else msgs.push('the P waves are irregular and not tied to the QRS, so they were not continued');
     }
-    res.beats = all;
+    res.beats = all.map(x => x.b);
     res.atrial.sort(byT);
     res.message = res.added.beats.length + res.added.atrial.length
-        ? `Continued: ${msgs.join('; ')}.` : msgs.length ? `Nothing added: ${msgs.join('; ')}.` : 'Nothing to add — the marks already reach the end.';
+        ? `Continued: ${msgs.join('; ')}.` : msgs.length ? `Nothing added: ${msgs.join('; ')}.` : 'Nothing to add — the marks already reach both ends.';
     return res;
 }
