@@ -36,5 +36,12 @@ for (const sc of SYNTH_SCENARIOS) {
         ok(`pvcBigeminy: PVCs flagged (${right}/${pvcT.length}, ${flagged.length - right} wrong)`, right >= 0.7 * pvcT.length && flagged.length - right <= 1);
     }
 }
+{
+    // a regular train with one small QRS (or a gap in a digitized trace): the second look finds it
+    const rec = makeExample('sinus'), II = Float32Array.from(rec.leads.II), q = rec.metadata.truth.QRS[5].t;
+    for (let i = Math.round((q - 20) / 2); i < Math.round((q + 150) / 2); i++) II[i] *= 0.3;
+    const m = detectMarks({ leads: { II }, sampleRate: 500 });
+    ok('a QRS at 30 % of the others in a regular train is still found', m.beats.some(b => Math.abs(b.qrsOnMs - q) <= 40));
+}
 console.log(`\n${pass} ok, ${fail} fail`);
 process.exit(fail ? 1 : 0);

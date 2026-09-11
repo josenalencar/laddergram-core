@@ -66,6 +66,33 @@ function detectR(y, fs) {
             i = Math.max(j, r + refr);
         } else i++;
     }
+    // second look: in a regular train, an interval close to twice (three times…) the others hides a beat the
+    // threshold missed (a smaller QRS, a trace gap in a digitized strip) — search the middle with a lower bar
+    if (R.length >= 4) {
+        const rr = R.slice(1).map((r, k) => r - R[k]), med = median(rr);
+        const ok = rr.filter(x => x < 1.4 * med);
+        const mean = ok.reduce((a, x) => a + x, 0) / Math.max(1, ok.length);
+        const cv = Math.sqrt(ok.reduce((a, x) => a + (x - mean) ** 2, 0) / Math.max(1, ok.length - 1)) / (mean || 1);
+        if (ok.length >= 3 && cv < 0.1) {
+            for (let k = rr.length - 1; k >= 0; k--) {
+                if (rr[k] < 1.7 * med) continue;
+                const nFit = Math.round(rr[k] / med);
+                const found = [];
+                for (let m = 1; m < nFit; m++) {
+                    const c = R[k] + Math.round(m * rr[k] / nFit), lo = c - Math.round(0.25 * med), hi = c + Math.round(0.25 * med);
+                    let best = lo;
+                    for (let q = lo; q <= hi; q++) if (e[q] > e[best]) best = q;
+                    if (!(e[best] > 0.2 * thr)) continue;
+                    const a = Math.max(0, best - w), b = Math.min(n - 1, best + half);
+                    const base = median(Array.from(y.subarray(Math.max(0, a - half), a))) ?? 0;
+                    let r = a;
+                    for (let q = a; q <= b; q++) if (Math.abs(y[q] - base) > Math.abs(y[r] - base)) r = q;
+                    found.push(r);
+                }
+                R.splice(k + 1, 0, ...found);
+            }
+        }
+    }
     return { R, d };
 }
 
