@@ -13,6 +13,7 @@ drawing: change a mark or a parameter and the ladder is rebuilt.
 | File | What it holds |
 |---|---|
 | `engine.js` | `buildLadder`, mechanisms, tiers, default intervals with normal ranges and references, `claims` (notes with a level and a code), stable element keys, `ENGINE_VERSION` |
+| `detect.js` | `detectMarks(signal)`: automatic P and QRS onsets (and ectopic QRS) from a signal JSON — for the editor's Import ECG and the planned digitizer; every mark is meant to be checked |
 | `export.js` | `layoutLadder` (one ladder → editor points/connections), `toLewisLadderDiagram`, `toLineStyle`, the generator's own JSON |
 | `synth.js` | synthetic 12-lead ECGs with a known timeline (teaching examples, test fixtures) |
 | `figures.js` | the review article's Figures 0–5 as presets |
