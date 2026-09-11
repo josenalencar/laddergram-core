@@ -2,6 +2,7 @@
 // P and QRS onset is known (synth.js metadata.truth).
 import { SYNTH_SCENARIOS, makeExample } from '../synth.js';
 import { buildLadder } from '../engine.js';
+import { detectMarks } from '../detect.js';
 import { continueRhythm, measureRhythm, plausibility, plausibleParams, suggestReading } from '../rhythm.js';
 
 let pass = 0, fail = 0;
@@ -117,6 +118,16 @@ for (const sc of SYNTH_SCENARIOS) {
 ok('wenckebach: not dissociated', !R('wenckebach').dissociated);
 ok('chbVent: wide and dissociated', R('chbVent').wide && R('chbVent').dissociated);
 ok('pvcBigeminy: regular groups of 2', R('pvcBigeminy').rrPeriod === 2 && R('pvcBigeminy').afVeto);
+
+console.log('\nthe suggestion from the detector alone (drop an ECG, nothing marked)');
+for (const sc of SYNTH_SCENARIOS) {
+    const rec = makeExample(sc.id), m = detectMarks(rec);
+    const s = suggestReading(m.beats, m.atrial, rec.metadata.truth.af ? { afib: true } : {});
+    // flutter 2:1 shows one F wave per QRS to the detector (read as AT); the ambiguous strips: any non-excluded reading
+    const okSet = { ...AMBIGUOUS, flutter21: ['flutter', 'at'] }[sc.id];
+    if (okSet) ok(`${sc.id} (detector): ${s.id} is one of ${okSet.join('/')}`, okSet.includes(s.id));
+    else ok(`${sc.id} (detector): suggested ${s.id} (expected ${sc.expect})`, s.id === sc.expect);
+}
 
 console.log('\ncontinue: jitter, both directions, groups');
 {

@@ -45,22 +45,35 @@ export function measureRhythm(beats = [], atrial = []) {
     const groupCV = rrPeriod && rrPeriod > 1 && rrAll.length > rrPeriod
         ? cv(rrAll.slice(0, rrAll.length - rrPeriod + 1).map((_, i) => rrAll.slice(i, i + rrPeriod).reduce((a, x) => a + x, 0))) : null;
     const rrCV = groupCV ?? cv(rr);
+    // the rate of a repeating group is its mean interval (bigeminy 480 + 1240 ms is 860 ms, not a tachycardia)
+    const RRg = groupCV != null ? median(rrAll.slice(0, rrAll.length - rrPeriod + 1).map((_, i) => rrAll.slice(i, i + rrPeriod).reduce((a, x) => a + x, 0))) / rrPeriod : RR;
     const regularity = rr.length < 2 ? 'unknown' : rrCV <= 0.08 ? 'regular' : rrCV >= 0.15 ? 'irregular' : 'variable';
     const qrsMs = median(B.map(width));
     const wideShare = n ? B.filter(b => width(b) >= WIDE_QRS_MS).length / n : 0;
     // a strip where every beat is marked ectopic (VT, a ventricular escape rhythm) is read as its own rhythm
     const ect = B.length && B.every(ectopic) ? () => false : ectopic;
     const out = {
-        nBeats: n, nP: A.length, RR: round(RR), rate: RR ? Math.round(60000 / RR) : null, rrCV: +rrCV.toFixed(3), regularity,
+        nBeats: n, nP: A.length, RR: round(RRg), rate: RRg ? Math.round(60000 / RRg) : null, rrCV: +rrCV.toFixed(3), regularity,
         qrsMs: round(qrsMs), wide: wideShare >= 0.6, wideShare: +wideShare.toFixed(2), anyEctopic: B.some(ectopic) && !B.every(ectopic),
         rrPeriod, afVeto: false, pqSweep: null,
-        tachy: RR != null && RR < TACHY_RR_MS,
+        tachy: RRg != null && RRg < TACHY_RR_MS,
         relation: A.length ? 'unknown' : 'none', RP: null, PR: null, rpClass: null, rpSD: null, pPerCycle: null,
         PP: null, ppCV: null, prFixed: false, prSD: null, dissociated: false, coveredCycles: 0,
     };
     if (A.length >= 2) {
+        // the atrial cycle, tolerant of a missed P (an interval of 2 × PP) or an extra one: the base
+        // interval of which most intervals are whole multiples
         const pp = A.slice(1).map((a, i) => a.tMs - A[i].tMs);
-        out.PP = round(median(pp)); out.ppCV = +cv(pp).toFixed(3);
+        let base = median(pp), bestFit = -1;
+        for (const v of pp) {
+            if (v < 150) continue;
+            const fit = pp.filter(x => { const k = Math.round(x / v); return k >= 1 && k <= 4 && Math.abs(x - k * v) <= 0.12 * v; }).length;
+            if (fit > bestFit || (fit === bestFit && v > base)) { bestFit = fit; base = v; }
+        }
+        const norm = pp.map(x => x / Math.max(1, Math.round(x / base))).filter(x => Math.abs(x - base) <= 0.15 * base);
+        base = median(norm.length ? norm : pp);
+        out.PP = round(base);
+        out.ppCV = norm.length >= Math.max(2, 0.75 * pp.length) ? +cv(norm).toFixed(3) : +cv(pp).toFixed(3);
     }
     out.afVeto = out.anyEctopic || (rrPeriod != null && rrPeriod >= 2) || regularity === 'regular';
     if (!A.length || n < 2) return out;
@@ -77,6 +90,8 @@ export function measureRhythm(beats = [], atrial = []) {
     }
     out.coveredCycles = cycles.length;
     if (!cycles.length) return out;
+    // a stray P among many beats says nothing about the P–QRS relation: read it as no P
+    if (n >= 6 && A.length < Math.max(2, 0.3 * n)) { out.relation = 'none'; return out; }
     const counts = cycles.map(c => c.ps.length);
     out.pPerCycle = +(counts.reduce((s, x) => s + x, 0) / cycles.length).toFixed(2);
     const ones = cycles.filter(c => c.ps.length === 1);
