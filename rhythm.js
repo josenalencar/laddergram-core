@@ -238,7 +238,7 @@ export function plausibleParams(mechanism, beats = [], atrial = []) {
             else set('VA', 30, 'typical', 'typical AVNRT: the retrograde P hides in the end of the QRS (pseudo r′ / pseudo S)');
             break;
         case 'avrt':
-            if (oneToOne) set('VA', Math.max(m.RP, VA_AP_MIN_MS + 10), 'measured', measuredVA + (m.RP <= VA_AP_MIN_MS ? ' — raised to the shortest VA an AVRT can have' : ''));
+            if (oneToOne) set('VA', m.RP, 'measured', measuredVA + (m.RP <= VA_AP_MIN_MS ? ` — at or below ${VA_AP_MIN_MS} ms, shorter than the usual rules allow for AVRT` : ''));
             else set('VA', cl ? Math.min(140, Math.round(0.35 * cl)) : 110, 'typical', 'orthodromic AVRT: the retrograde P sits in the ST segment (VA about 100–150 ms)');
             break;
         case 'pjrt':
@@ -327,6 +327,9 @@ export function continueRhythm(beats = [], atrial = [], untilMs = Infinity) {
 
     // QRS
     const pat = B.length >= 2 ? beatPattern(B) : null;
+    const rrMed = median(B.slice(1).map((b, i) => b.qrsOnMs - B[i].qrsOnMs));
+    // every QRS already marked (the viewer's delineator finds them all): only the P waves need continuing
+    const reachesEnd = B.length >= 2 && B[B.length - 1].qrsOnMs + 1.5 * rrMed >= untilMs;
     const all = B.slice();
     if (pat) {
         const n = B.length;
@@ -342,7 +345,7 @@ export function continueRhythm(beats = [], atrial = [], untilMs = Infinity) {
         }
         res.qrs = { k: pat.k, RR: Math.round(pat.rrOfInterval(n - 1)) };
         if (res.added.beats.length) msgs.push(`${res.added.beats.length} QRS ${pat.k === 1 ? `every ${res.qrs.RR} ms` : `repeating your group of ${pat.k} beats`}`);
-    } else if (B.length >= 2) msgs.push('the RR is irregular, so the QRS were not continued — mark them (or import the signal)');
+    } else if (B.length >= 2 && !reachesEnd) msgs.push('the RR is irregular, so the QRS were not continued — mark them (or import the signal)');
 
     // P
     const withP = (t) => {
@@ -355,18 +358,23 @@ export function continueRhythm(beats = [], atrial = [], untilMs = Infinity) {
         const pp = A.slice(1).map((a, i) => a.tMs - A[i].tMs);
         const ppMed = median(pp);
         const ppRegular = pp.length >= 1 && pp.every(x => Math.abs(x - ppMed) <= Math.max(30, 0.08 * ppMed));
-        const unit = pat ? Array.from({ length: pat.k }, (_, s) => pat.rrOfInterval(s)).reduce((s, x) => s + x, 0) : null;
+        const unit = pat ? Array.from({ length: pat.k }, (_, s) => pat.rrOfInterval(s)).reduce((s, x) => s + x, 0) : rrMed;
         const near = (r) => r >= 0.9 && Math.abs(r - Math.round(r)) <= 0.06;
-        const locked = pat && (!ppRegular || A.length < 2 || near(unit / ppMed) || near(ppMed / unit));
+        const lockable = pat || reachesEnd;
+        const locked = lockable && (!ppRegular || A.length < 2 || near(unit / ppMed) || near(ppMed / unit));
         if (locked) {
-            // each P keeps its place in the cycle of the beat before it (the P before the first QRS: in the virtual cycle before)
-            const k = pat.k;
-            const anchorOf = (t) => { let i = -1; for (let j = 0; j < B.length; j++) if (B[j].qrsOnMs <= t + 20) i = j; return i; };
+            // each P keeps its place in the cycle of the beat before it (the P before the first QRS: in the virtual cycle before);
+            // with an irregular RR and every QRS marked, each P keeps its distance to the NEAREST QRS instead
+            const k = pat ? pat.k : 1;
+            const rrOf = pat ? pat.rrOfInterval : () => rrMed;
+            const anchorOf = pat
+                ? (t) => { let i = -1; for (let j = 0; j < B.length; j++) if (B[j].qrsOnMs <= t + 20) i = j; return i; }
+                : (t) => B.reduce((bi, b, j) => (Math.abs(b.qrsOnMs - t) < Math.abs(B[bi].qrsOnMs - t) ? j : bi), 0);
             const clusters = Array.from({ length: k }, () => []);
             let maxIdx = -1;
             for (const a of A) {
                 let i = anchorOf(a.tMs), off;
-                if (i < 0) { i = -1; off = a.tMs - (B[0].qrsOnMs - pat.rrOfInterval(((-1 % k) + k) % k)); }
+                if (i < 0) { i = -1; off = a.tMs - (B[0].qrsOnMs - rrOf(((-1 % k) + k) % k)); }
                 else off = a.tMs - B[i].qrsOnMs;
                 maxIdx = Math.max(maxIdx, i);
                 const s = ((i % k) + k) % k;

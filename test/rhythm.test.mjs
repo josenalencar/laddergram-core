@@ -92,5 +92,16 @@ for (const id of ['sinus', 'avb1', 'normalSinus', 'avnrt', 'avrt', 'svtShortRP',
     ok('one QRS: nothing added, says why', one.added.beats.length === 0 && one.message.length > 0);
 }
 
+{
+    // the viewer's case: every QRS detected, P waves marked on the first beats only
+    for (const id of ['svtLongRP', 'avrt', 'sinus']) {
+        const { tr, beats, atrial } = truthMarks(id);
+        const A0 = atrial.filter(a => a.tMs <= beats[2].qrsOnMs + 20);
+        const c = continueRhythm(beats, A0, tr.durationMs);
+        const hitP = atrial.filter(a => c.atrial.some(x => Math.abs(x.tMs - a.tMs) <= 40)).length;
+        ok(`${id}, all QRS known: no QRS added, P ${hitP}/${atrial.length}`, c.added.beats.length === 0 && hitP >= atrial.length - 2);
+    }
+}
+
 console.log(`\n${pass} ok, ${fail} fail`);
 process.exit(fail ? 1 : 0);
