@@ -1,6 +1,6 @@
 {
   "name": "laddergram-core",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Plausibility engine for Lewis ladder diagrams (laddergrams): marks in, ladder out. Shared by the ECG viewer's generator and the Lewis Ladder editor.",
   "type": "module",
   "private": true,

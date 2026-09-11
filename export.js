@@ -109,12 +109,28 @@ export function toLineStyle(ladder) {
     const last = tiers[tiers.length - 1];
     const snap = (pt) => (pt.tier === last || pt.tier === 'SN') ? { ...pt, frac: 0 } : pt;
     const paths = [];
+    const blocksOnLast = [];
     for (const p of ladder.paths) {
         const from = snap(p.from), to = snap(p.to);
         const onLast = from.tier === last && to.tier === last;
-        if (onLast) continue;                                     // collapses onto the V line
+        if (onLast) {                                             // collapses onto the V line…
+            // …but a block there (infra-His block) must stay visible: it moves onto the wave that arrives
+            if (p.terminal === 'block') blocksOnLast.push(p);
+            continue;
+        }
         if (from.tier === to.tier && from.frac === to.frac && from.tMs === to.tMs) continue;
         paths.push({ ...p, from, to });
+    }
+    const above = tiers[tiers.length - 2];
+    for (const b of blocksOnLast) {
+        const inc = paths.find(q => q.to.tier === above && q.to.frac === 1 && Math.abs(q.to.tMs - b.from.tMs) < 1
+            && (q.atrialId ?? null) === (b.atrialId ?? null) && (q.beatId ?? null) === (b.beatId ?? null));
+        if (!inc) continue;
+        // stop short of the V line, with the block bar: the wave never reaches the ventricles
+        const f = inc.from, t = inc.to, k = 0.85;
+        const tIn = f.tier === t.tier ? f.tMs + (t.tMs - f.tMs) * (k - f.frac) / Math.max(1e-6, t.frac - f.frac) : t.tMs;
+        inc.to = { ...t, frac: k, tMs: tIn };
+        inc.terminal = 'block';
     }
     const events = ladder.events.map(e => snap(e));
     // A dot wherever conduction meets a level line — the defining mark of this convention. A point at
