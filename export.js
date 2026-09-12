@@ -232,7 +232,9 @@ export function toLineStyle(ladder) {
  *  o.points / o.connections / o.dedupe      arrays / Map to append to (lets several ladders share numbering)
  *
  * Every element keeps what the engine knew: `key` (stable across rebuilds), `role`, and for points
- * `inferred` (true unless the point is a marked P or QRS onset — those were measured on the ECG).
+ * `inferred` (false only for an event the tracing fixes — one whose mark the user placed — as the renderer
+ * draws it: hollow when `source === 'user'`, filled otherwise). A point that is only the end of a path,
+ * not an event, gets `pointStyle: 'none'`: the renderer draws dots at events only.
  */
 export function layoutLadder(ladder, o) {
     const { tMinMs, tMaxMs, xOf, yOfLevel, lineIdOfLevel } = o;
@@ -260,7 +262,7 @@ export function layoutLadder(ladder, o) {
         return pt.id;
     };
     const inWindow = (t) => t >= tMinMs && t <= tMaxMs;
-    const measured = (e) => e.role === 'p' || e.role === 'qrs' || (e.role === 'f' && e.source === 'user');
+    const measured = (e) => e.source === 'user';
     // Events first, so a point that is also an event carries the event's key and role (handles use them).
     for (const e of ladder.events) {
         if (e.style === 'none' || !inWindow(e.tMs)) continue;
@@ -281,10 +283,12 @@ export function layoutLadder(ladder, o) {
         if (p.curve && !c.clipped) conn.curve = p.curve;
         if (pass) conn.color = '#94a3b8';
         else if (p.color) conn.color = p.color;
-        if (p.label) conn.label = p.label.replace(/\n/g, ' ');
+        if (p.label) conn.label = p.label;
+        if (p.labelAnchor) conn.labelAnchor = p.labelAnchor;
+        if (p.labelSide != null) conn.labelSide = p.labelSide;
         connections.push(conn);
     }
-    for (const pt of points) delete pt.fromEvent;
+    for (const pt of points) { if (!pt.fromEvent && !pt.pointStyle) pt.pointStyle = 'none'; delete pt.fromEvent; }
     return { points, connections };
 }
 
@@ -299,7 +303,7 @@ export function layoutLadder(ladder, o) {
  * @param opts.provenance           { kind, source, licence, deidentified, lead, speedMmS, gainMmMv, note }
  */
 export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands', backgroundImage = null, imageWidthPx = 0, imageHeightPx = 0,
-                                               marks = null, provenance = null } = {}) {
+                                               timeWidthPx = imageWidthPx, marks = null, provenance = null } = {}) {
     if (!(tMaxMs > tMinMs)) throw new Error('empty time range');
     const list0 = Array.isArray(ladders) ? ladders : [{ ladder: ladders }];
     // each ladder may carry its own style (a teaching figure can show both); `style` is the default
@@ -354,7 +358,7 @@ export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands',
     // Time calibration: the strip image spans [tMin, tMax] across its full width (renderStripImage);
     // without an image the ladders span x = MARGIN … W − MARGIN.
     out.calibration = hasImage
-        ? { space: 'image', x0Px: 0, t0Ms: tMinMs, msPerPx: (tMaxMs - tMinMs) / imageWidthPx, method: 'generator', confidence: 'measured' }
+        ? { space: 'image', x0Px: 0, t0Ms: tMinMs, msPerPx: (tMaxMs - tMinMs) / timeWidthPx, method: 'generator', confidence: 'measured' }
         : { space: 'canvas', x0Px: MARGIN, t0Ms: tMinMs, msPerPx: (tMaxMs - tMinMs) / (W - 2 * MARGIN), method: 'schematic', confidence: 'assumed' };
     if (hasImage) out.imageSize = { w: imageWidthPx, h: imageHeightPx };
     if (marks) {
@@ -371,6 +375,7 @@ export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands',
             const src = it.source || {};
             return { group: g, mechanism: r.mechanism || src.mechanism || 'avnodal', params: r.params || {}, tiers: r.tiers || src.tiers || [],
                      ...(r.beatOverrides && Object.keys(r.beatOverrides).length ? { beatOverrides: r.beatOverrides } : {}),
+                     ...(r.brackets ? { brackets: r.brackets } : {}),
                      engineVersion: ENGINE_VERSION, status: r.linked === false ? 'detached' : 'linked' };
         });
     }

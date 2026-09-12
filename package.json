@@ -1,7 +1,7 @@
 {
   "name": "laddergram-core",
-  "version": "1.6.0",
-  "description": "Plausibility engine for Lewis ladder diagrams (laddergrams): marks in, ladder out. Shared by the ECG viewer's generator and the Lewis Ladder editor.",
+  "version": "1.7.0",
+  "description": "Plausibility engine and renderer for Lewis ladder diagrams (laddergrams): marks in, ladder out, one drawing. Shared by the ECG viewer's generator and the Lewis Ladder editor.",
   "type": "module",
   "private": true,
   "exports": {
@@ -11,7 +11,9 @@
     "./synth": "./synth.js",
     "./figures": "./figures.js",
     "./detect": "./detect.js",
-    "./rhythm": "./rhythm.js"
+    "./rhythm": "./rhythm.js",
+    "./render": "./render.js",
+    "./stack": "./stack.js"
   },
   "files": [
     "engine.js",
@@ -20,6 +22,8 @@
     "export.js",
     "synth.js",
     "figures.js",
+    "render.js",
+    "stack.js",
     "README.md",
     "PREMISES.md"
   ],
