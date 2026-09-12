@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.8.0';
+export const ENGINE_VERSION = '1.9.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -218,26 +218,72 @@ function lcg(seed) {
  * Greedy in QRS order — nearest-preceding is what resolves 2:1 and Wenckebach
  * (the extra P sits too close to, or too far from, the QRS and stays unpaired).
  */
+/**
+ * A PR shorter than this is not conduction, whatever the rest of the strip says. Pre-excitation can be
+ * very short, so this sits below the shortest accessory-pathway PR rather than at the nodal floor.
+ */
+const PR_FLOOR_MS = 40;
+
+/**
+ * Which P conducted to which QRS.
+ *
+ * The window [PRmin, PRmax] is a prior about hearts in general, and the strip in front of us is evidence
+ * about this one. When most beats agree on a PR, a beat whose only candidate P sits a little outside the
+ * general window is far more likely to be the same thing as its neighbours than to be a coincidence — a
+ * tracing marked at a PR of 85 ms will have some beats at 75, and drawing those two as blocked while
+ * drawing the other fourteen as conducted describes no heart that exists.
+ *
+ * So: pair with the general window first; then, only if that left a QRS with no P at all, and only if the
+ * PRs it did find agree closely with each other, widen the window around what this strip actually does and
+ * try once more. The wider pass is kept only when it explains more of the strip.
+ */
 export function pairAtrialToBeats(beats, atrial, params, { minLeadMs } = {}) {
     const P = resolveParams(params);
     const minLead = minLeadMs ?? P.PRmin;
     const B = beats.slice().sort(byQ), A = atrial.slice().sort(byT);
-    const claimed = new Set();
-    const pairs = new Map();
-    const unpairedV = [];
-    for (const b of B) {
-        let best = null;
-        for (const a of A) {
-            if (claimed.has(a.id)) continue;
-            const lead = b.qrsOnMs - a.tMs;
-            if (lead < minLead || lead > P.PRmax) continue;
-            if (!best || a.tMs > best.tMs) best = a;
+    const aById = new Map(A.map(a => [a.id, a]));
+
+    // What the reader has said outright is never re-decided: a beat told which P conducted it keeps that P,
+    // and a P called blocked is not available to conduct anything.
+    const forced = new Map();
+    for (const b of B) if (b.pairedAtrialId && aById.has(b.pairedAtrialId)) forced.set(b.id, b.pairedAtrialId);
+    const spoken = new Set([...forced.values(), ...A.filter(a => a.blockedAt).map(a => a.id)]);
+
+    const run = (lo, hi) => {
+        const claimed = new Set(spoken);
+        const pairs = new Map(forced);
+        const unpairedV = [];
+        for (const b of B) {
+            if (pairs.has(b.id)) continue;
+            let best = null;
+            for (const a of A) {
+                if (claimed.has(a.id)) continue;
+                const lead = b.qrsOnMs - a.tMs;
+                if (lead < lo || lead > hi) continue;
+                if (!best || a.tMs > best.tMs) best = a;
+            }
+            if (!best) { unpairedV.push(b); continue; }
+            pairs.set(b.id, best.id);
+            claimed.add(best.id);
         }
-        if (!best) { unpairedV.push(b); continue; }
-        pairs.set(b.id, best.id);
-        claimed.add(best.id);
-    }
-    return { pairs, unpairedA: A.filter(a => !claimed.has(a.id)), unpairedV };
+        return { pairs, unpairedA: A.filter(a => !claimed.has(a.id)), unpairedV };
+    };
+
+    const first = run(minLead, P.PRmax);
+    // Nothing to rescue, or too little agreement to learn from.
+    if (!first.unpairedV.length || first.pairs.size < 3) return first;
+
+    const bById = new Map(B.map(b => [b.id, b]));
+    const prs = [...first.pairs].map(([bId, aId]) => bById.get(bId).qrsOnMs - aById.get(aId).tMs);
+    const med = median(prs);
+    const mad = median(prs.map(x => Math.abs(x - med)));
+    // Wenckebach lengthens the PR on purpose, so its PRs do not agree and the window must not move.
+    if (!(mad <= Math.max(15, 0.15 * med))) return first;
+
+    const lo = Math.max(PR_FLOOR_MS, Math.min(minLead, med - Math.max(35, 4 * mad)));
+    if (lo >= minLead) return first;
+    const second = run(lo, P.PRmax);
+    return second.pairs.size > first.pairs.size ? second : first;
 }
 
 /** RR, PR, AH, HV per beat for a given pairing. */
@@ -623,6 +669,13 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
             // beat-to-beat PR jitter in sinus rhythm is not that.
             const curve = pattern.wenckeRun.has(a.id) && AH - AHbase >= 20 ? r1((AH - AHbase) * 0.15) : 0;
             avConduct(B, tIn, J.tAvOut, { style: AH < P.AHmin ? 'dashed' : 'solid', curve, atrialId: a.id, beatId: b.id });
+        } else if (a.blockedAt === 'AV') {
+            avBlock(B, tIn, null, { atrialId: a.id });
+        } else if (a.blockedAt && AHs.length) {
+            // Below the node, where the reader says it stopped: cross with the AH of the conducted beats.
+            infraHisBlock(B, a, tIn, tIn + P.PA + median(AHs));
+        } else if (a.blockedAt) {
+            avBlock(B, tIn, null, { atrialId: a.id });
         } else if (pattern.mobitz2.has(a.id)) {
             // Constant AH, then a drop: the block is infranodal. Cross the AV
             // node normally and die in the His–Purkinje tier (or at the very
