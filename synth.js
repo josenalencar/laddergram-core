@@ -34,6 +34,13 @@ const P_PAC = [[34, 15, 0.1, unit([0.35, 0.6, 0.7])], [62, 16, 0.07, unit([0.7, 
 const QRS = {
     normal: { width: 95, parts: [[14, 6, 0.18, unit([-0.4, 0.1, 0.9])], [44, 11, 1.5, unit([0.55, 0.75, -0.35])], [72, 9, 0.35, unit([-0.2, -0.5, -0.45])]],
               t: [[1, 55, 0.32, unit([0.45, 0.7, 0.35])], [1.12, 35, 0.08, unit([0.45, 0.7, 0.35])]] },
+    // Nonspecific intraventricular conduction delay, 110 ms: wider than normal but below the 120-ms threshold of
+    // bundle branch block (Figure 6 of the review). Fragmented on purpose — q, R, a notch (RsR′, 0.2 mV deep) and
+    // a terminal S of 0.5 mV — so the eye reads the width instead of a narrow spike. In lead II the deviation
+    // from baseline spans 106 ms of signal starting 4 ms after the mark, which measures ~110 ms with calipers
+    // on the printed figure (the drawn line adds a few ms at each end).
+    ivcd: { width: 110, parts: [[14, 7, 0.18, unit([-0.3, -0.6, 0.4])], [36, 8, 0.95, unit([0.55, 0.75, -0.35])], [60, 7, 0.35, unit([0.15, 0.3, -0.1])], [78, 8, 0.55, unit([0.4, 0.6, -0.25])], [92, 8.5, 0.62, unit([-0.25, -0.7, -0.3])]],
+            t: [[1, 55, 0.3, unit([0.45, 0.7, 0.35])], [1.12, 35, 0.08, unit([0.45, 0.7, 0.35])]] },
     rbbb: { width: 140, parts: [[14, 6, 0.18, unit([-0.4, 0.1, 0.9])], [42, 11, 1.3, unit([0.55, 0.75, -0.35])], [70, 10, 0.3, unit([-0.2, -0.5, -0.45])],
                                 [108, 17, 0.6, unit([-0.65, 0.05, 0.75])]],
             t: [[1, 55, 0.28, unit([0.55, 0.6, -0.25])], [1.12, 35, 0.07, unit([0.55, 0.6, -0.25])]] },
@@ -175,10 +182,10 @@ export const SYNTH_SCENARIOS = [
       timeline: () => sinusTrain({ pp: 800, pr: 190, morph: 'rbbb', drop: k => k % 3 === 2 }) },
     { id: 'twoToOne', label: '2:1 AV block', expect: 'avnodal', hint: 'Every other P conducts; mark the blocked ones.',
       timeline: () => sinusTrain({ pp: 640, pr: 200, drop: k => k % 2 === 1 }) },
-    { id: 'chb', label: 'Complete AV block, junctional escape', expect: 'avb3', hint: 'Atria 83 /min, ventricles 40 /min, no relation.',
+    { id: 'chb', label: 'Complete AV block, junctional escape', expect: 'avb3', hint: 'Atria 92 /min, ventricles 40 /min (ratio 2.31, not an integer): no relation.',
       timeline: () => {
           const P = [], QRS = [];
-          for (let t = 180; t < DUR - 150; t += 720) P.push({ t, kind: 'sinus' });
+          for (let t = 180; t < DUR - 150; t += 650) P.push({ t, kind: 'sinus' });
           for (let t = 640; t < DUR - 150; t += 1500) QRS.push({ t, morph: 'normal' });
           return { durationMs: DUR, P, QRS, flutter: null, af: false };
       } },
@@ -268,28 +275,57 @@ export const SYNTH_SCENARIOS = [
     { id: 'wideTachy1to1', label: 'Wide-QRS tachycardia with 1:1 VA (RP 210 ms)', expect: 'vt',
       hint: 'CL 340 ms, QRS ~150 ms with LBBB form, retrograde P 210 ms after QRS onset (P-to-QRS 130 ms) — VT with 1:1 VA, fast–slow AVNRT with LBBB, or antidromic AVRT over a fast pathway.',
       timeline: () => tachyTrain({ cl: 340, rp: 210, dur: 4000, morph: 'lbbb' }) },
+    // Capture and fusion are arithmetic, not luck: a sinus P captures only if the node has recovered from the
+    // last retrograde penetration (≥ ~250 ms) AND its conducted QRS still beats the next VT beat. With PR 200
+    // that needs a VT cycle ≥ 250 + 200 + 120 = 570 ms, which is why captures belong to slower VT. Here:
+    // VT 580 ms (103 /min), sinus 720 ms (83 /min); the capture lands 120 ms before the beat that was due
+    // (P 1580 + PR 200 = 1780, due 1900; 260 ms of recovery) and resets the focus; the fusion lands 40 ms
+    // before it (P 4460 + PR 180 = 4640, focus fires 4680). Every other P is either refractory (120, 80,
+    // 220 ms after a ventricular beat) or preempted by the next one; the phase also keeps 3 of the 4 P waves
+    // that a reader can see detectable (detect.test.mjs).
     { id: 'vtCaptureFusion', label: 'VT with AV dissociation, a capture and a fusion beat', expect: 'vt',
-      hint: 'VT CL 460 ms (130 /min), sinus 79 /min dissociated; a P 210 ms after a VT beat captures (PR 200, VT reset); a later one fuses 40 ms before the expected VT beat (PR 180).',
+      hint: 'VT CL 580 ms (103 /min), sinus 83 /min dissociated; a P 260 ms after a VT beat captures (PR 200) 120 ms before the beat that was due and resets the focus; a later one fuses 40 ms before the next (PR 180).',
       timeline: () => {
-          const pp = 760, P = [], QRS = [];
-          for (let t = 570; t < 5950; t += pp) P.push({ t, kind: 'sinus' });
-          for (const t of [200, 660, 1120]) QRS.push({ t, morph: 'vt' });
-          QRS.push({ t: 1530, morph: 'normal', capture: true });              // P at 1330, PR 200; VT reset
-          for (const t of [1990, 2450, 2910, 3370]) QRS.push({ t, morph: 'vt' });
-          QRS.push({ t: 3790, morph: 'fusion', fusion: true });               // P at 3610, PR 180, 40 ms before the VT beat due at 3830
-          for (const t of [4290, 4750, 5210, 5670]) QRS.push({ t, morph: 'vt' });
+          const P = [140, 860, 1580, 2300, 3020, 3740, 4460, 5180].map(t => ({ t, kind: 'sinus' }));
+          const QRS = [];
+          for (const t of [160, 740, 1320]) QRS.push({ t, morph: 'vt' });
+          QRS.push({ t: 1780, morph: 'normal', capture: true });                    // P 1580, PR 200; the focus is reset
+          for (const t of [2360, 2940, 3520, 4100]) QRS.push({ t, morph: 'vt' });
+          QRS.push({ t: 4640, morph: 'fusion', fusion: true, focusAt: 4680 });      // P 4460, PR 180; focus 40 ms later
+          for (const t of [5260, 5840]) QRS.push({ t, morph: 'vt' });
           return { durationMs: 6000, P, QRS, flutter: null, af: false };
       } },
-    { id: 'apparentChb', label: 'Apparent complete AV block: regular P, two wide QRS', expect: 'avb3',
-      hint: 'Sinus 75 /min; two wide QRS 1600 ms apart, each 220 ms after a P — complete block with escape, or concealed His extrasystoles.',
+    { id: 'twoToOneNarrow', label: '2:1 AV block, narrow QRS (sinus 75 /min, PR 220)', expect: 'avnodal',
+      hint: 'Sinus 75 /min; every other P conducts, both with PR 220 and a narrow QRS — 2:1 block in the AV node or below the His, or concealed His extrasystoles (pseudo-block).',
       timeline: () => {
           const P = [], QRS = [];
           for (let t = 300; t < 4000; t += 800) P.push({ t, kind: 'sinus' });
-          QRS.push({ t: 1100 + 220, morph: 'lbbb' }, { t: 2700 + 220, morph: 'lbbb' });
+          QRS.push({ t: 1100 + 220, morph: 'normal' }, { t: 2700 + 220, morph: 'normal' });
           return { durationMs: 4200, P, QRS, flutter: null, af: false };
       } },
+    // Complete AV block: the atrial and ventricular rates are never in an integer ratio (60/30 reads as 2:1),
+    // so the P waves march through the escape rhythm at every PR (PREMISES.md §6). 70/31 = 2.26. (Below
+    // ~30 /min the R-peak detector starts taking P waves for beats, so the escape stays at 31.)
+    // Figure 6 of the review: the same 2:1 block with a QRS of 110 ms — mildly prolonged, not a bundle branch
+    // block — so the nodal and the infranodal readings both stay open.
+    { id: 'twoToOneIvcd', label: '2:1 AV block, QRS 110 ms (sinus 75 /min, PR 220)', expect: 'avnodal',
+      hint: 'Sinus 75 /min; every other P conducts with PR 220 and a QRS of 110 ms — 2:1 block in the AV node or below the His, or concealed His extrasystoles (pseudo-block).',
+      timeline: () => {
+          const P = [], QRS = [];
+          for (let t = 300; t < 4000; t += 800) P.push({ t, kind: 'sinus' });
+          QRS.push({ t: 1100 + 220, morph: 'ivcd' }, { t: 2700 + 220, morph: 'ivcd' });
+          return { durationMs: 4200, P, QRS, flutter: null, af: false };
+      } },
+    { id: 'chbDissociated', label: 'Complete AV block, atria 70 /min, ventricular escape 31 /min', expect: 'avb3',
+      hint: 'P every 857 ms, wide escape every 1935 ms (ratio 2.26, not an integer): the P waves fall at every point of the cycle — no P–QRS relation.',
+      timeline: () => {
+          const P = [], QRS = [];
+          for (let t = 250; t < DUR - 150; t += 60000 / 70) P.push({ t: Math.round(t), kind: 'sinus' });
+          for (let t = 800; t < DUR - 250; t += 60000 / 31) QRS.push({ t: Math.round(t), morph: 'pvc' });
+          return { durationMs: DUR, P, QRS, flutter: null, af: false };
+      } },
     { id: 'normalSinus', label: 'Normal sinus rhythm, 75 /min (PR 140)', expect: 'avnodal',
-      hint: 'PP 800 ms, PR 140 ms: SP 40, PH 100 (atrium 30 + AV node 70), HV 40 — the reference ladder of the manuscript.',
+      hint: 'PP 800 ms, PR 140 ms: SP 60, PH 100 (atrium 30 + AV node 70), HV 40 — the reference ladder of the manuscript.',
       timeline: () => {
           const P = [], QRS = [];
           for (let t = 200; t < 2400; t += 800) { P.push({ t, kind: 'sinus' }); QRS.push({ t: t + 140, morph: 'normal' }); }

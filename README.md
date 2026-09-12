@@ -18,6 +18,7 @@ drawing: change a mark or a parameter and the ladder is rebuilt.
 | `export.js` | `layoutLadder` (one ladder → editor points/connections), `toLewisLadderDiagram`, `toLineStyle`, the generator's own JSON |
 | `synth.js` | synthetic 12-lead ECGs with a known timeline (teaching examples, test fixtures) |
 | `figures.js` | the review article's Figures 0–5 as presets |
+| `PREMISES.md` | the drawing rules (time, classic tiers, dots on lines, mechanisms) and why each one holds |
 
 Every ladder carries `engine: { name, version }`; bump `ENGINE_VERSION` (and `package.json`) whenever the
 drawing of an existing input changes, and refresh the golden figures on purpose:

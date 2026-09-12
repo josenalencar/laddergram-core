@@ -20,8 +20,15 @@
  *   its slope IS the conduction time. The bottom edge of one tier is the top
  *   edge of the next (A frac 1 ≡ AV frac 0), so segments chain continuously.
  *   Retrograde conduction runs bottom → top with an arrowhead.
- *   Ventricular activation is IMMEDIATE at this scale: a vertical line at QRS
- *   onset through the V tier (classic Lewis convention).
+ *   The two chambers are instantaneous at this scale: the atrium is a vertical
+ *   line at P onset through the A tier, the ventricle a vertical line at QRS
+ *   onset through the V tier, on every beat. Conduction between them is drawn
+ *   in the tiers in between: the AV band runs from P onset to His activation
+ *   (PH, the surface counterpart of AH), His to QRS onset is HV. PA stays in the
+ *   interval arithmetic (AH = PR − PA − HV) but has no drawn extent.
+ *   Every point sits at the time of the event it stands for (A = P onset,
+ *   V = QRS onset, His = QRS onset − HV). The drawing rules, with their
+ *   reasons, are listed in PREMISES.md.
  *
  * Optional tiers (the user picks them): AV fast + AV slow (replace AV), His,
  * the bundle branches and the fascicles. The accessory pathway has no tier of
@@ -94,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.2.0';
+export const ENGINE_VERSION = '1.5.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -130,14 +137,14 @@ export const DEFAULT_PARAMS = Object.freeze({
 /** Labels/units for the params panel. `adv` = hidden under "advanced". */
 export const PARAM_INFO = {
     SACT: { label: 'SA conduction', unit: 'ms', normal: [45, 125], ref: 'josephson', what: 'sinus-node discharge → P onset: the slope across the SN tier' },
-    PA: { label: 'PA (intra-atrial)', unit: 'ms', normal: [25, 55], ref: 'josephson', what: 'P onset → AV-node entry: where the atrial line meets the AV tier' },
+    PA: { label: 'PA (intra-atrial)', unit: 'ms', normal: [25, 55], ref: 'josephson', what: 'P onset → AV-node entry: used to estimate AH (PR − PA − HV); the atrial tier itself is drawn instantaneous, so the AV band spans PA + AH' },
     HV: { label: 'HV', unit: 'ms', normal: [35, 55], ref: 'josephson', what: 'His → QRS onset: the His line ends this long before the V line' },
     AHmin: { label: 'AH minimum', unit: 'ms', normal: [55, 125], normalOf: 'AH', ref: 'josephson', what: 'the fastest the AV node conducts; a PR shorter than PA + AH min + HV is drawn as pre-excitation' },
     PRmin: { label: 'PR min (pairing)', unit: 'ms', adv: true, what: 'a P closer than this to a QRS is not the one that conducted it' },
     PRmax: { label: 'PR max (pairing)', unit: 'ms', adv: true, what: 'a P further than this from a QRS is not the one that conducted it' },
     VA: { label: 'VA (QRS onset → retro P)', unit: 'ms', threshold: { at: 70, meaning: '≤ 70 ms favours typical AVNRT; > 70 ms allows orthodromic AVRT' }, ref: 'issa', what: 'QRS onset → retrograde P onset: where the returning wave reaches the atrium' },
     apVdelay: { label: 'QRS onset → AP ventricular end', unit: 'ms', adv: true, what: 'QRS onset → the ventricular end of the accessory pathway' },
-    apToAV: { label: 'Retro A → AV-node entry', unit: 'ms', adv: true, what: 'retrograde atrial activation → the next entry into the AV node' },
+    apToAV: { label: 'Retro A → AV-node entry', unit: 'ms', adv: true, what: 'retrograde atrial activation → the next entry into the AV node (AH estimate only; the atrium is drawn instantaneous)' },
     vExit: { label: 'PVC focus → His exit', unit: 'ms', adv: true, what: 'ectopic focus → exit into the His–Purkinje system (retrograde)' },
     ectopicVA: { label: 'Ectopic retro VA (empty = concealed)', unit: 'ms', what: 'ectopic QRS onset → retrograde P; empty = the wave dies in the AV node' },
     wideQrsMs: { label: 'Wide QRS from', unit: 'ms', adv: true, what: 'a QRS at least this wide, with no bundle-branch block marked, is drawn as ventricular' },
@@ -146,7 +153,7 @@ export const PARAM_INFO = {
     fibMeanMs: { label: 'Mean f–f cycle', unit: 'ms', what: 'spacing of the schematic f waves' },
     concealDepth: { label: 'Concealed depth (0–1)', unit: '', adv: true, what: 'how far into the AV node a concealed retrograde wave is drawn' },
     blockDepth: { label: 'Block depth (0–1)', unit: '', adv: true, what: 'how far into the AV node a blocked P is drawn' },
-    blockBelowHis: { label: 'Block below the His (0 = AV node, 1 = infra-His)', unit: '', what: 'where complete block sits: 0 = AV node (junctional escape), 1 = below the His (ventricular escape)' },
+    blockBelowHis: { label: 'Block below the His (0 = AV node, 1 = infra-His)', unit: '', what: 'where the block sits: 0 = AV node, 1 = below the His (complete block: ventricular escape; 2:1 or other drops that are not Wenckebach: the His is recorded and the ventricle is not reached)' },
     jtNodeMs: { label: 'Focus → His (in the node)', unit: 'ms', adv: true, what: 'junctional focus → His entry' },
     apAnteMs: { label: 'Pathway conduction (atrial end → delta wave)', unit: 'ms', what: 'atrial end of the pathway → delta wave: the pre-excited descent' },
     vhMs: { label: 'QRS onset → retrograde His (through ventricular muscle)', unit: 'ms', adv: true, what: 'QRS onset → retrograde His: the slow return through ventricular muscle' },
@@ -155,12 +162,12 @@ export const PARAM_INFO = {
 
 const ALWAYS = ['SACT', 'PA', 'HV', 'AHmin', 'PRmin', 'PRmax', 'wideQrsMs', 'concealDepth', 'blockDepth'];
 export const MECHANISMS = [
-    { id: 'avnodal', label: 'Sinus / AV conduction (1st-degree, Wenckebach, Mobitz II, 2:1)', params: [...ALWAYS, 'ectopicVA'] },
+    { id: 'avnodal', label: 'Sinus / AV conduction (1st-degree, Wenckebach, Mobitz II, 2:1)', params: [...ALWAYS, 'ectopicVA', 'blockBelowHis'] },
     { id: 'avb3', label: 'Complete (3rd-degree) AV block', params: [...ALWAYS, 'blockBelowHis'] },
     { id: 'hisExtra', label: 'Concealed His extrasystoles (pseudo AV block)', params: [...ALWAYS, 'hPrimeLead'] },
     { id: 'avnrt', label: 'AVNRT — typical / atypical by VA', params: [...ALWAYS, 'VA'] },
-    { id: 'avrt', label: 'Orthodromic AVRT (accessory pathway)', params: [...ALWAYS, 'VA', 'apVdelay', 'apToAV'] },
-    { id: 'pjrt', label: 'PJRT (orthodromic AVRT over a slow, decremental pathway — long RP)', params: [...ALWAYS, 'VA', 'apVdelay', 'apToAV'] },
+    { id: 'avrt', label: 'Orthodromic AVRT (accessory pathway)', params: [...ALWAYS, 'VA', 'apVdelay'] },
+    { id: 'pjrt', label: 'PJRT (orthodromic AVRT over a slow, decremental pathway — long RP)', params: [...ALWAYS, 'VA', 'apVdelay'] },
     { id: 'avrtAnti', label: 'Antidromic AVRT (anterograde over the pathway)', params: [...ALWAYS, 'VA', 'apAnteMs', 'vhMs'] },
     { id: 'at', label: 'Atrial tachycardia (atrial focus)', params: ALWAYS },
     { id: 'jt', label: 'Junctional tachycardia (nodal focus)', params: [...ALWAYS, 'VA', 'jtNodeMs'] },
@@ -348,7 +355,7 @@ function sinusEntry(B, a, { sn = true, focus = false } = {}) {
     if (focus) {
         // an atrial focus: the line starts de novo inside the atrial tier, nothing enters it
         B.ev('A', a.tMs, 0.3, { style: 'asterisk', role: 'focus-atrial', atrialId: a.id, source: a.source || 'auto' });
-        B.seg(['A', a.tMs, 0.3], ['A', a.tMs + P.PA, 1], { atrialId: a.id, role: 'atrium' });
+        B.seg(['A', a.tMs, 0.3], ['A', a.tMs, 1], { atrialId: a.id, role: 'atrium' });
         return;
     }
     if (sn && T.hasSN) {
@@ -356,7 +363,7 @@ function sinusEntry(B, a, { sn = true, focus = false } = {}) {
         B.seg(['SN', a.tMs - P.SACT, 0.5], ['A', a.tMs, 0], { atrialId: a.id, role: 'sa' });
     }
     B.ev('A', a.tMs, 0, { role: 'p', atrialId: a.id, source: a.source || 'auto' });
-    B.seg(['A', a.tMs, 0], ['A', a.tMs + P.PA, 1], { atrialId: a.id, role: 'atrium' });
+    B.seg(['A', a.tMs, 0], ['A', a.tMs, 1], { atrialId: a.id, role: 'atrium' });
 }
 
 /** Antegrade AV-nodal conduction (in AV, or AV fast when the pair is drawn). */
@@ -429,21 +436,21 @@ function hisAndV(B, b, { from } = {}) {
 }
 
 /**
- * The V tier of a conducted beat: vertical (activation is immediate at this
- * scale) for a narrow QRS; slanted across the QRS duration when the ventricles
- * are activated one after the other (bundle-branch block, aberrancy,
- * pre-excitation) — the slope of that segment is the QRS width.
+ * The V tier of a beat: a vertical line at QRS onset, narrow or wide, conducted,
+ * aberrant or pre-excited (PREMISES.md: the ventricle is marked by the onset of
+ * its activation; a wide QRS is shown by the blocked branch, the pathway or the
+ * ventricular focus, not by the V line).
  */
-function vTier(B, b, { slant = !!(b.conduction || b.preexcited) } = {}) {
+function vTier(B, b) {
     B.ev('V', b.qrsOnMs, 0, { role: 'qrs', beatId: b.id, source: b.source || 'auto' });
-    const end = slant ? b.qrsOffMs : b.qrsOnMs;
+    const end = b.qrsOnMs;
     const label = b.origin === 'capture' ? 'capture' : b.origin === 'fusion' ? 'fusion' : null;
     B.seg(['V', b.qrsOnMs, 0], ['V', end, 1], { beatId: b.id, role: 'ventricle', label });
 }
 
 function atrialRetro(B, tA, o = {}) {
     B.ev('A', tA, 1, { role: 'p-retro', dir: 'retro', ...o });
-    B.seg(['A', tA, 1], ['A', tA + B.P.PA, 0], { arrow: 'end', role: 'atrium-retro', ...o });
+    B.seg(['A', tA, 1], ['A', tA, 0], { arrow: 'end', role: 'atrium-retro', ...o });
 }
 
 /** Junctional focus (His tier, or low in the AV node when His is hidden). retroTo = retro P time or null. */
@@ -516,10 +523,10 @@ function ventricularFocus(B, b, retroTo, { retro = true } = {}) {
 function snInvade(B, tA, o = {}) {
     const { P, T } = B;
     if (!T.hasSN) return;
-    B.seg(['A', tA + P.PA, 0], ['SN', tA + P.PA + P.SACT, 0.5], { arrow: 'end', role: 'sn-retro', ...o });
+    B.seg(['A', tA, 0], ['SN', tA + P.SACT, 0.5], { arrow: 'end', role: 'sn-retro', ...o });
 }
 
-/** Retrograde over the accessory pathway: one straight line labelled AP, ventricle → atrium. */
+/** Retrograde over the accessory pathway: one straight line labelled AP, ventricle → atrium (at the retrograde P onset). */
 function apRetro(B, b, tA, { longRP = false } = {}) {
     const t = b.qrsOnMs + B.P.apVdelay;
     vExit(B, b, t, 'v-to-ap');
@@ -601,11 +608,11 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
         if (claimedRetro.has(a.id)) continue;   // drawn by its ectopic beat
         if (leading.has(a.id)) {
             B.ev('A', a.tMs, 1, { role: 'p-edge', atrialId: a.id, source: a.source || 'auto' });
-            B.seg(['A', a.tMs, 1], ['A', a.tMs + P.PA, 0], { atrialId: a.id, role: 'atrium-edge' });
+            B.seg(['A', a.tMs, 1], ['A', a.tMs, 0], { atrialId: a.id, role: 'atrium-edge' });
             continue;
         }
         sinusEntry(B, a, { focus: atFocus });
-        const tIn = a.tMs + P.PA;
+        const tIn = a.tMs;                      // the atrial tier is instantaneous: the AV band starts at P onset (PH)
         if (truncated.has(a.id)) {
             B.seg([T.av, tIn, 0], [T.av, Math.min(input.durationMs, tIn + P.AHmin), 0.4], { terminal: 'open', atrialId: a.id, role: 'av-open' });
         } else if (beatOfA.has(a.id)) {
@@ -620,7 +627,7 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
             // Constant AH, then a drop: the block is infranodal. Cross the AV
             // node normally and die in the His–Purkinje tier (or at the very
             // bottom of the AV junction when His is not drawn).
-            const tH = tIn + pattern.mobitz2.get(a.id);
+            const tH = tIn + P.PA + pattern.mobitz2.get(a.id);
             if (T.hasHis) {
                 avConduct(B, tIn, tH, { atrialId: a.id });
                 B.link(tH, T.av, 1, 'His', 0, { atrialId: a.id });
@@ -628,6 +635,10 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
             } else {
                 B.seg([T.av, tIn, 0], [T.av, tH, 0.95], { terminal: 'block', atrialId: a.id, role: 'av-block-low' });
             }
+        } else if (P.blockBelowHis >= 0.5 && AHs.length) {
+            // block placed below the His (2:1 or any drop the user attributes to the His–Purkinje system): the P
+            // crosses the node with the AH of the conducted beats, the His is recorded, the ventricle is not reached
+            infraHisBlock(B, a, tIn, tIn + P.PA + median(AHs));
         } else {
             avBlock(B, tIn, null, { atrialId: a.id });
         }
@@ -637,9 +648,11 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
         if (pairs.has(b.id)) {
             hisAndV(B, b);
             if (b.origin === 'fusion') {
-                // a ventricular wavefront already in progress: its line converges on the same V mark
-                B.ev('V', b.qrsOnMs - 8, 0.85, { style: 'asterisk', role: 'focus-ventricular', beatId: b.id });
-                B.seg(['V', b.qrsOnMs - 8, 0.85], ['V', b.qrsOnMs, 0], { beatId: b.id, role: 'ventricle-fusion' });
+                // the ventricular focus fires while the conducted wavefront is already inside the ventricle:
+                // its asterisk sits at the moment it fired (focusDelayMs after QRS onset, from the marks)
+                const tF = b.qrsOnMs + (b.focusDelayMs ?? 0);
+                B.ev('V', tF, 0.5, { style: 'asterisk', role: 'focus-ventricular', beatId: b.id });
+                B.seg(['V', tF, 0.5], ['V', tF, 1], { beatId: b.id, role: 'ventricle-fusion' });
             }
             continue;
         }
@@ -756,6 +769,17 @@ function classifyConduction(atrial, beatOfA, ahOf, claimedRetro, ectopicOnsets) 
     return { mobitz2, wenckeRun, wenckebach, pac, twoToOne: false, blocked, explained };
 }
 
+/** A P that crosses the node and the His (H recorded at tH) and dies just below it; without a His tier, low in the node. */
+function infraHisBlock(B, a, tIn, tH) {
+    const { T } = B;
+    if (T.hasHis) {
+        avConduct(B, tIn, tH, { atrialId: a.id });
+        B.link(tH, T.av, 1, 'His', 0, { atrialId: a.id });
+        B.seg(['His', tH, 0], ['His', tH + 15, 1], { atrialId: a.id, role: 'his' });
+        B.seg(['V', tH + 15, 0], ['V', tH + 30, 0.18], { terminal: 'block', atrialId: a.id, role: 'his-block' });
+    } else B.seg([T.av, tIn, 0], [T.av, tH, 0.95], { terminal: 'block', atrialId: a.id, role: 'av-block-low' });
+}
+
 /** Complete AV block: nothing pairs; every P blocks, every QRS is an escape. */
 function buildAvb3(B, input) {
     const { P, T } = B;
@@ -764,17 +788,10 @@ function buildAvb3(B, input) {
     const infra = P.blockBelowHis >= 0.5;
     for (const a of atrial) {
         sinusEntry(B, a);
-        const tIn = a.tMs + P.PA;
+        const tIn = a.tMs;
         if (!infra) { avBlock(B, tIn, null, { atrialId: a.id }); continue; }
         // infra-Hisian block: the node conducts, the wave dies below the His
-        const tH = tIn + 2 * P.AHmin;
-        if (T.hasHis) {
-            avConduct(B, tIn, tH, { atrialId: a.id });
-            B.link(tH, T.av, 1, 'His', 0, { atrialId: a.id });
-            // H is recorded: the line crosses the His and ends just below it
-            B.seg(['His', tH, 0], ['His', tH + 15, 1], { atrialId: a.id, role: 'his' });
-            B.seg(['V', tH + 15, 0], ['V', tH + 30, 0.18], { terminal: 'block', atrialId: a.id, role: 'his-block' });
-        } else B.seg([T.av, tIn, 0], [T.av, tH, 0.95], { terminal: 'block', atrialId: a.id, role: 'av-block-low' });
+        infraHisBlock(B, a, tIn, tIn + P.PA + 2 * P.AHmin);
     }
     let nJ = 0, nV = 0;
     for (const b of beats) {
@@ -799,8 +816,8 @@ function initiatingEntry(B, b0, atrial) {
         .sort(byT).pop();
     if (!cand) return null;
     B.ev('A', cand.tMs, 0, { role: 'p', atrialId: cand.id, source: cand.source || 'auto' });
-    B.seg(['A', cand.tMs, 0], ['A', cand.tMs + P.PA, 1], { atrialId: cand.id, role: 'atrium' });
-    return cand.tMs + P.PA;
+    B.seg(['A', cand.tMs, 0], ['A', cand.tMs, 1], { atrialId: cand.id, role: 'atrium' });
+    return cand.tMs;
 }
 
 /**
@@ -885,7 +902,9 @@ function buildAvrt(B, input, { pjrt = false } = {}) {
 
     beats.forEach((b, i) => {
         const tLow = lows[i];
-        const tIn = i > 0 ? tA[i - 1] + P.apToAV : (initiatingEntry(B, b, input.atrial) ?? tLow - medAH);
+        // the atrial tier is instantaneous: the anterograde limb leaves the point where the pathway reached the
+        // atrium (the conduction from the atrium to the node is part of the AV band, as in a sinus beat)
+        const tIn = i > 0 ? tA[i - 1] : (initiatingEntry(B, b, input.atrial) ?? tLow - medAH);
         avConduct(B, tIn, tLow, { beatId: b.id });
         hisAndV(B, b);
         apRetro(B, b, tA[i], { longRP });
@@ -925,12 +944,12 @@ function buildAfib(B, input) {
     const conducted = new Set([...used.values()].map(b => b.id));
     f.forEach((t, i) => {
         B.ev('A', t, 0, { style: 'none', role: 'f' });
-        B.seg(['A', t, 0], ['A', t + P.PA, 1], { role: 'atrium' });
+        B.seg(['A', t, 0], ['A', t, 1], { role: 'atrium' });
         if (used.has(i)) {
             const b = used.get(i);
-            avConduct(B, t + P.PA, junctionTimes(B, b.qrsOnMs).tAvOut, { beatId: b.id });
+            avConduct(B, t, junctionTimes(B, b.qrsOnMs).tAvOut, { beatId: b.id });
         } else {
-            B.seg([B.T.av, t + P.PA, 0], [B.T.av, t + P.PA + 30, 0.15 + 0.45 * rnd()],
+            B.seg([B.T.av, t, 0], [B.T.av, t + 30, 0.15 + 0.45 * rnd()],
                   { style: 'dashed', terminal: 'block', role: 'av-concealed' });
         }
     });
@@ -982,11 +1001,11 @@ function buildFlutter(B, input) {
     const bById = new Map(beats.map(b => [b.id, b]));
     for (const f of F) {
         B.ev('A', f.tMs, 0, { role: 'F', atrialId: f.id });
-        B.seg(['A', f.tMs, 0], ['A', f.tMs + P.PA, 1], { atrialId: f.id, role: 'atrium' });
+        B.seg(['A', f.tMs, 0], ['A', f.tMs, 1], { atrialId: f.id, role: 'atrium' });
         if (beatOfF.has(f.id)) {
             const b = bById.get(beatOfF.get(f.id));
-            avConduct(B, f.tMs + P.PA, junctionTimes(B, b.qrsOnMs).tAvOut, { atrialId: f.id, beatId: b.id });
-        } else avBlock(B, f.tMs + P.PA, 0.3, { atrialId: f.id });
+            avConduct(B, f.tMs, junctionTimes(B, b.qrsOnMs).tAvOut, { atrialId: f.id, beatId: b.id });
+        } else avBlock(B, f.tMs, 0.3, { atrialId: f.id });
     }
     for (const b of beats) {
         if (pairs.has(b.id)) hisAndV(B, b);
@@ -1034,7 +1053,7 @@ function buildJt(B, input) {
 
 /**
  * Antidromic AVRT: anterograde over the accessory pathway (labelled AP) into
- * the ventricle — pre-excited, wide QRS, V slanted across its width — and back
+ * the ventricle — pre-excited, wide QRS — and back
  * up the His-Purkinje system and AV node to the atrium (retrograde P at QRS + VA).
  */
 function buildAvrtAnti(B, input) {
@@ -1044,27 +1063,22 @@ function buildAvrtAnti(B, input) {
     const tA = beats.map(b => b.qrsOnMs + P.VA);
     beats.forEach((b, i) => {
         const q = b.qrsOnMs;
-        // A Kent pathway conducts fast: its line runs from the atrial end (A bottom) to the delta wave in
-        // apAnteMs and reads as nearly vertical. When the P-to-delta interval is longer, the difference is
-        // atrial spread from the retrograde exit to the pathway's atrial end, drawn inside the atrial tier.
+        // The atrial tier is instantaneous, so the pathway line leaves the atrium at the P onset that feeds it
+        // (the retrograde P of the previous cycle) and reaches the delta wave: its extent is the P-to-delta
+        // interval, i.e. atrial conduction to the pathway's insertion plus pathway conduction, which the
+        // surface ECG cannot separate.
         let tAP;
-        if (i > 0) {
-            const tTop = tA[i - 1] + P.PA, late = q - P.apAnteMs;
-            if (late > tTop + 5) {
-                B.seg(['A', tTop, 0], ['A', late, 1], { beatId: b.id, role: 'atrium' });
-                tAP = late;
-            } else tAP = tA[i - 1];
-        } else { const e = initiatingEntry(B, b, input.atrial); tAP = e ?? q - P.apAnteMs; }
+        if (i > 0) tAP = tA[i - 1];
+        else { const e = initiatingEntry(B, b, input.atrial); tAP = e ?? q - P.apAnteMs; }
         B.seg(['A', tAP, 1], ['V', q, 0], { label: 'AP', color: AP_COLOR, beatId: b.id, role: 'ap-ante' });
-        vTier(B, b, { slant: true });
+        vTier(B, b);
         const tH = q + P.vhMs;
         let tAV = tH;
         if (T.hasHis) {
-            // the slow part of the circuit, drawn: ventricular activation (the slanted V line) reaches the
-            // His–Purkinje system retrogradely and climbs to the His at QRS onset + vhMs
-            const w = Math.max(40, (b.qrsOffMs ?? q + 120) - q);
-            const f = Math.max(0.15, Math.min(0.55, (P.vhMs - 15) / w));
-            B.seg(['V', q + f * w, f], ['V', tH, 0], { arrow: 'end', beatId: b.id, role: 'v-to-his', label: 'retrograde\nHis–Purkinje', labelAnchor: 'end-right' });
+            // the slow part of the circuit, drawn: ventricular activation reaches the His–Purkinje system
+            // retrogradely and climbs to the His at QRS onset + vhMs — it leaves the V line from mid-band,
+            // like the retrograde exit of a ventricular focus
+            B.seg(['V', q, 0.5], ['V', tH, 0], { arrow: 'end', beatId: b.id, role: 'v-to-his', label: 'retrograde\nHis–Purkinje', labelAnchor: 'start-below-right' });
             B.link(tH, 'V', 0, 'His', 1, { beatId: b.id });
             tAV = tH + 15;
             B.seg(['His', tH, 1], ['His', tAV, 0], { arrow: 'end', beatId: b.id, role: 'his-retro' });
@@ -1096,13 +1110,13 @@ function buildHisExtra(B, input) {
     let nH = 0;
     for (const a of atrial) {
         sinusEntry(B, a);
-        const tIn = a.tMs + P.PA;
+        const tIn = a.tMs;
         if (beatOfA.has(a.id)) {
             const b = bById.get(beatOfA.get(a.id));
             avConduct(B, tIn, junctionTimes(B, b.qrsOnMs).tAvOut, { atrialId: a.id, beatId: b.id });
             continue;
         }
-        const tH = tIn - P.hPrimeLead;
+        const tH = tIn + P.PA - P.hPrimeLead;       // H′ fires hPrimeLead before the P reaches the node
         nH++;
         if (T.hasHis) {
             B.ev('His', tH, 0.5, { style: 'asterisk', role: 'focus-his', atrialId: a.id });

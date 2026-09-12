@@ -107,7 +107,7 @@ for (const id of ['sinus', 'avb1', 'normalSinus', 'avnrt', 'avrt', 'svtShortRP',
 }
 
 console.log('\nthe suggestion is the scenario\'s reading (ambiguous strips: any reading not excluded)');
-const AMBIGUOUS = { svtShortRP: ['avnrt', 'avrt', 'at', 'jt'], svtLongRP: ['pjrt', 'at', 'avnrt'], apparentChb: ['avb3', 'hisExtra', 'avnodal'] };
+const AMBIGUOUS = { svtShortRP: ['avnrt', 'avrt', 'at', 'jt'], svtLongRP: ['pjrt', 'at', 'avnrt'], twoToOneNarrow: ['avnodal', 'hisExtra'] };
 for (const sc of SYNTH_SCENARIOS) {
     const { tr, beats, atrial } = truthMarks(sc.id);
     const s = suggestReading(beats, atrial, tr.af ? { afib: true } : {});

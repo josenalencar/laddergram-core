@@ -102,37 +102,98 @@ function clipPath(p, tMin, tMax, level) {
  *    on one line to a dot on the next. The last tier (V) is the last line.
  * toLineStyle maps a band ladder onto the line convention: everything in the
  * last tier and every SN dot is put on its line, and segments that collapse onto
- * the V line (the vertical V stroke, a PVC's exit along V) disappear.
+ * the V line (the V stroke, a PVC's exit along V) disappear. On a line a dot means
+ * "this level is activated now", so (PREMISES.md, dots on lines):
+ *  - an atrial activation is one dot on the A line at P onset. A retrograde P, which the
+ *    bands start at the bottom of the atrial tier, is lifted onto the A line at the same
+ *    time; the nodal limb that brought it keeps its AV dot and joins it vertically;
+ *  - an accessory pathway connects the atrium and the ventricle: its atrial end is the A dot
+ *    of that activation, and it crosses the AV line without a dot;
+ *  - a ventricular activation is one dot on the V line at QRS onset: every line leaving the
+ *    ventricle (an accessory pathway, a retrograde exit) starts from it;
+ *  - an atrial focus sits on the A line.
  */
 export function toLineStyle(ladder) {
     const tiers = ladder.tiers || [];
     const last = tiers[tiers.length - 1];
-    const snap = (pt) => (pt.tier === last || pt.tier === 'SN') ? { ...pt, frac: 0 } : pt;
-    const paths = [];
-    const blocksOnLast = [];
+    const belowA = tiers[tiers.indexOf('A') + 1];
+    const aboveV = tiers[tiers.length - 2];
+    const near = (a, b) => Math.abs(a - b) <= 0.6;
+    const ptKey = (q) => `${q.tier}|${Math.round(q.tMs * 10)}|${q.frac}`;
+
+    // atrial activations entered from below: their dot goes on the A line at P onset
+    const retroP = ladder.events.filter(e => e.tier === 'A' && e.frac === 1 && (e.role === 'p-retro' || e.role === 'p-edge'));
+    const climbs = new Set(['atrium-retro', 'atrium-edge']);
+    const moved = new Map();                                       // point key → point on its line
+    for (const e of retroP) moved.set(ptKey(e), { tier: 'A', tMs: e.tMs, frac: 0 });
     for (const p of ladder.paths) {
-        const from = snap(p.from), to = snap(p.to);
+        // the top of the band's atrial climb is the same activation: lines leaving it start at P onset
+        if (climbs.has(p.role)) moved.set(ptKey(p.to), { tier: 'A', tMs: p.from.tMs, frac: 0 });
+    }
+    for (const e of ladder.events) {
+        if (e.tier === 'A' && e.style === 'asterisk' && e.frac > 0 && e.frac < 1) moved.set(ptKey(e), { tier: 'A', tMs: e.tMs, frac: 0 });
+    }
+    // atrial onsets (P, retrograde P, focus) for the atrial end of an accessory pathway
+    const aOnsets = ladder.events.filter(e => e.tier === 'A' && e.style !== 'none').map(e => e.tMs).sort((a, b) => a - b);
+    const onsetAtOrBefore = (t) => { let best = null; for (const x of aOnsets) if (x <= t + 0.6) best = x; return best ?? t; };
+    // ventricular onsets per beat (the QRS dot; for a pure focus, its asterisk)
+    const qOn = new Map();
+    for (const e of ladder.events) if (e.tier === last && e.role === 'focus-ventricular' && e.beatId != null) qOn.set(e.beatId, e.tMs);
+    for (const e of ladder.events) if (e.tier === last && e.role === 'qrs' && e.beatId != null) qOn.set(e.beatId, e.tMs);
+    const onVLine = (q) => q.tier === last || (q.tier === aboveV && q.frac === 1);
+
+    const apAnteFrom = new Set(ladder.paths.filter(p => p.role === 'ap-ante').map(p => ptKey(p.from)));
+    const snap = (pt) => (pt.tier === last || pt.tier === 'SN') ? { ...pt, frac: 0 } : pt;
+    const move = (pt) => moved.get(ptKey(pt)) ?? pt;
+    const paths = [];
+    const dropped = [];
+    for (let p of ladder.paths) {
+        if (climbs.has(p.role)) continue;                           // replaced by the A dot itself
+        if (p.role === 'atrium' && apAnteFrom.has(ptKey(p.to))) continue;   // atrial spread to the pathway: the AP starts at the A dot
+        let from = move(p.from), to = move(p.to);
+        // the atrial end of an orthodromic pathway is also where the atrium descends to the node: label on the left
+        if (p.role === 'ap') { to = { tier: 'A', tMs: onsetAtOrBefore(to.tMs), frac: 0 }; p = { ...p, labelSide: -1 }; }
+        if (p.role === 'ap-ante') from = { tier: 'A', tMs: onsetAtOrBefore(from.tMs), frac: 0 };
+        // one ventricular dot per beat: a line leaving the ventricle starts at QRS onset
+        if (p.style !== 'pass' && onVLine(from) && !onVLine(to) && qOn.has(p.beatId)) from = { tier: last, tMs: qOn.get(p.beatId), frac: 0 };
+        from = snap(from); to = snap(to);
         const onLast = from.tier === last && to.tier === last;
-        if (onLast) {                                             // collapses onto the V line…
-            // …but a block there (infra-His block) must stay visible: it moves onto the wave that arrives
-            if (p.terminal === 'block') blocksOnLast.push(p);
-            continue;
-        }
-        if (from.tier === to.tier && from.frac === to.frac && from.tMs === to.tMs) continue;
+        if (onLast) { dropped.push(p); continue; }                // collapses onto the V line
+        if (from.tier === to.tier && from.frac === to.frac && near(from.tMs, to.tMs)) continue;
+        if (from.tier === 'A' && to.tier === 'A' && from.frac === 0 && to.frac === 0) continue;   // along the A line
         paths.push({ ...p, from, to });
     }
-    const above = tiers[tiers.length - 2];
-    for (const b of blocksOnLast) {
-        const inc = paths.find(q => q.to.tier === above && q.to.frac === 1 && Math.abs(q.to.tMs - b.from.tMs) < 1
+    // the nodal limb of a retrograde P ends on the AV line: it keeps its AV dot, joined vertically to the A dot.
+    // When the atrium was reached over a pathway instead, the next anterograde limb leaves the AV dot below the
+    // A dot: the same vertical, downwards (the atrium is instantaneous in both conventions).
+    for (const e of retroP) {
+        if (!belowA) break;
+        const mk = (ref, from, to, arrow, role) => paths.push({ id: `${ref.id}-${role}`, beatId: ref.beatId, atrialId: ref.atrialId ?? null,
+            from, to, style: 'solid', terminal: 'point', arrow, curve: 0, label: null, color: null, role,
+            key: `p|${role}|${ref.beatId ?? ''}|${Math.round(e.tMs)}` });
+        const onAV = { tier: belowA, tMs: e.tMs, frac: 0 }, onA = { tier: 'A', tMs: e.tMs, frac: 0 };
+        const lim = paths.find(p => p.style !== 'pass' && p.to.tier === belowA && p.to.frac === 0 && near(p.to.tMs, e.tMs));
+        const ante = paths.find(p => p.style !== 'pass' && p.from.tier === belowA && p.from.frac === 0 && near(p.from.tMs, e.tMs));
+        if (lim) mk(lim, onAV, onA, 'end', 'av-to-atrium');
+        else if (ante) mk(ante, onA, onAV, 'none', 'atrium-to-av');
+    }
+    // a block that collapsed onto the V line (infra-His block) must stay visible and must not leave a dot on the V
+    // line: it moves onto the wave that arrives, which stops short of the V line with the block bar (1.4.2)
+    for (const b of dropped) {
+        if (b.terminal !== 'block') continue;
+        const inc = paths.find(q => q.to.tier === aboveV && q.to.frac === 1 && Math.abs(q.to.tMs - b.from.tMs) < 1
             && (q.atrialId ?? null) === (b.atrialId ?? null) && (q.beatId ?? null) === (b.beatId ?? null));
         if (!inc) continue;
-        // stop short of the V line, with the block bar: the wave never reaches the ventricles
         const f = inc.from, t = inc.to, k = 0.85;
         const tIn = f.tier === t.tier ? f.tMs + (t.tMs - f.tMs) * (k - f.frac) / Math.max(1e-6, t.frac - f.frac) : t.tMs;
         inc.to = { ...t, frac: k, tMs: tIn };
         inc.terminal = 'block';
     }
-    const events = ladder.events.map(e => snap(e));
+    const events = ladder.events.map(e => {
+        let q = snap(move(e));
+        if (q.tier === last && e.role === 'focus-ventricular' && qOn.has(e.beatId)) q = { ...q, tMs: qOn.get(e.beatId) };
+        return q === e ? e : { ...e, tier: q.tier, tMs: q.tMs, frac: q.frac };
+    });
     // A dot wherever conduction meets a level line — the defining mark of this convention. A point at
     // the bottom of tier i sits on the line of tier i+1; blocked and open ends get no dot.
     const onLine = (pt) => {
@@ -140,10 +201,11 @@ export function toLineStyle(ladder) {
         const i = tiers.indexOf(pt.tier);
         return pt.frac === 1 && i >= 0 && i < tiers.length - 1 ? { tier: tiers[i + 1], tMs: pt.tMs } : null;
     };
-    const seen = new Set(events.map(e => `${e.tier}|${Math.round(e.tMs)}|${e.frac}`));
+    const lineKey = (q) => `${q.tier}|${Math.round(q.tMs)}`;
+    const seen = new Set(events.map(e => onLine(e)).filter(Boolean).map(lineKey));
     const add = (q, p) => {
         if (!q) return;
-        const k = `${q.tier}|${Math.round(q.tMs)}|0`;
+        const k = lineKey(q);
         if (seen.has(k)) return;
         seen.add(k);
         events.push({ tier: q.tier, tMs: q.tMs, frac: 0, role: 'junction-dot', beatId: p.beatId, atrialId: p.atrialId,
