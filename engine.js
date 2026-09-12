@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.5.0';
+export const ENGINE_VERSION = '1.6.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -1298,3 +1298,41 @@ export function sameKindIds(kind, id, beats, atrial) {
     const cls = (b) => b.quality === 'pvc';
     return beats.filter(b => cls(b) === cls(ref)).map(b => b.id);
 }
+
+// ─── builder primitives ─────────────────────────────────────────────────────
+
+/**
+ * The pieces the mechanism rules above are built from, for a consumer that authors its own paths
+ * instead of choosing a mechanism — the Lewis Ladder editor's "By hand" mode, where the user draws
+ * the conduction link by link.
+ *
+ * They are exported rather than copied so that a hand-drawn ladder and an engine-drawn one obey the
+ * same premises (PREMISES.md) and land on the same pixels: a chamber is instantaneous at its onset,
+ * the AV band runs from P onset to the His, the pathway crosses the AV line without a dot. A copy in
+ * the consumer would drift from this file the first time a premise changed, and the drift would show
+ * up as two panels of one figure disagreeing.
+ *
+ * This is public API: changing a signature here is a breaking change for that consumer.
+ *
+ * Typical use — one beat conducted from a P through the node:
+ *
+ *     const T = builders.tierContext(normalizeTiers(['A', 'AV', 'His', 'V']));
+ *     const B = builders.makeBuilder('hand', resolveParams({}), T);
+ *     builders.sinusEntry(B, atrialMark, { sn: false });
+ *     builders.avConduct(B, atrialMark.tMs, builders.junctionTimes(B, beat.qrsOnMs).tAvOut,
+ *                        { atrialId: atrialMark.id, beatId: beat.id });
+ *     builders.hisAndV(B, beat);
+ *     const ladder = B.L;      // { tiers, mechanism, params, events, paths, intervals, notes, claims }
+ */
+export const builders = Object.freeze({
+    // context and the builder itself
+    tierContext, makeBuilder, junctionTimes,
+    // atrium
+    sinusEntry, atrialRetro, snInvade,
+    // AV node
+    avConduct, avBlock, avRetro, avConcealed,
+    // below the node
+    hisAndV, branches, blockStub, vTier, vExit,
+    // foci and pathways
+    junctionalFocus, ventricularFocus, apRetro,
+});

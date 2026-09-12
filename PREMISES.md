@@ -92,6 +92,17 @@ submission): every one of them was an error the previous rule produced.
   the AH of the conducted beats. A long HV on the conducted beats goes with it (Figure 6B: HV 70).
 - Atrial fibrillation f waves are schematic (fixed seed); flutter is fitted to ≥2 marked F waves.
 
+## 4b. Drawing by hand
+
+- The pieces the mechanism rules are built from are exported as `builders` (engine.js): a consumer that
+  authors its own paths — the Lewis Ladder editor's "By hand" mode, where the user draws the conduction
+  link by link — assembles them instead of copying the geometry. **A hand-drawn ladder therefore obeys
+  every premise above by construction**, and a hand panel and an engine panel of one figure land on the
+  same pixels. `test/builders.test.mjs` asserts that a sinus beat assembled from the primitives is the
+  ladder `buildLadder` draws for the same marks.
+- A consumer may pass any `mechanism` name to `makeBuilder` (the editor passes `'hand'`); it is carried
+  through to the ladder and means only "who authored these paths".
+
 ## 5. Publication figures
 
 - `figures.js` holds the review article's figures as presets; the publication PNG has no footer, and the
