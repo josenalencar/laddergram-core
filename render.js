@@ -96,6 +96,9 @@ export const LINE_GAP = 38;
  */
 export const BRACKET_ROW_H = 30;
 
+/** How many 15 px rows a caption takes: one per 140 characters, at most three. */
+export const capLines = (c) => (c ? Math.min(3, Math.ceil(String(c).length / 140)) : 0);
+
 export function makeLayout({ stripH = 160, gap = 26, groups = [DEFAULT_TIERS], groupGap = 30, footer = 30,
                              titles = false, captionLines = [], style = 'bands', styles = [], bracketRows = [],
                              catalog = TIER_CATALOG } = {}) {

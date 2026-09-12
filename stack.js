@@ -20,7 +20,8 @@ export const SHORT = Object.freeze({
 });
 
 /** How many caption lines to reserve under a ladder: one per ~140 characters, at most three. */
-export const capLines = (c) => (c ? Math.min(3, Math.ceil(String(c).length / 140)) : 0);
+export { capLines } from './render.js';
+import { capLines } from './render.js';
 
 /**
  * Every ladder drawn, top to bottom.

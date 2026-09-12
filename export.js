@@ -19,10 +19,14 @@
  * tagged with its `group`.
  */
 import { TIER_CATALOG, CONDUCTIONS, normalizeTiers, ENGINE_NAME, ENGINE_VERSION } from './engine.js';
+import { makeLayout, capLines } from './render.js';
 
 // GROUP_GAP: lewis-ladder adds this much room before every ladder after the first
 // (src/lib/ladders.ts lineOffsets) — the two must match or points miss their lines.
-export const LEWIS = Object.freeze({ W: 1000, H: 500, MARGIN: 50, SPACING: 35, TOP: 10, GAP: 30, NO_IMAGE_Y: 80, IMG_MAX_H: 180, GROUP_GAP: 30 });
+// The editor's page: the renderer's own frame (see render.js makeLayout) — a 60 px label column, the strip
+// fitted into 940 × 180 from x 60 (a 40 px paper rail when there is none), tiers to x 992, per-tier heights
+// from the catalog. `LAYOUT_VERSION` tells the editor these coordinates need no migration.
+export const LEWIS = Object.freeze({ W: 1000, X0: 60, X1: 992, STRIP_FIT_W: 940, IMG_MAX_H: 180, NO_IMAGE_STRIP_H: 40, FOOTER: 30, LAYOUT_VERSION: 2 });
 export const FORMAT = 'ecgdante-laddergram';
 export const FORMAT_VERSION = 2;
 
@@ -243,10 +247,12 @@ export function layoutLadder(ladder, o) {
     const byXY = o.dedupe || new Map();
     const idx = Object.fromEntries((ladder.tiers || []).map((t, i) => [t, i]));
     const level = (pt) => (idx[pt.tier] ?? 0) + pt.frac;
+    // Two paths meeting at the same place share one point: the same place to a tenth of a pixel. The point
+    // itself keeps the full precision, so the editor draws it exactly where the renderer draws the figure.
     const r10 = (v) => Math.round(v * 10) / 10;
     const pointAt = (t, lv, meta = {}) => {
-        const x = r10(xOf(t)), y = r10(yOfLevel(lv));
-        const k = `${x}|${y}`;
+        const x = xOf(t), y = yOfLevel(lv);
+        const k = `${r10(x)}|${r10(y)}`;
         const found = byXY.get(k);
         if (found) {
             if (meta.asterisk) found.pointStyle = 'asterisk';
@@ -309,57 +315,70 @@ export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands',
     // each ladder may carry its own style (a teaching figure can show both); `style` is the default
     const styleOf = (it) => (it.style === 'lines' || it.style === 'bands' ? it.style : style);
     const list = list0.map(it => ({ ...it, style: styleOf(it), source: it.ladder, ladder: styleOf(it) === 'lines' ? toLineStyle(it.ladder) : it.ladder }));
-    const { W, MARGIN, SPACING, TOP, GAP, NO_IMAGE_Y, IMG_MAX_H, GROUP_GAP } = LEWIS;
+    const { X0, X1, STRIP_FIT_W, IMG_MAX_H, NO_IMAGE_STRIP_H, FOOTER } = LEWIS;
     const hasImage = !!(backgroundImage && imageWidthPx > 0 && imageHeightPx > 0);
-    let startY = NO_IMAGE_Y;
-    if (hasImage) {
-        const scale = Math.min((W - 2 * MARGIN) / imageWidthPx, IMG_MAX_H / imageHeightPx);
-        startY = imageHeightPx * scale + TOP + GAP;
-    }
-    const xOf = (t) => MARGIN + (t - tMinMs) / (tMaxMs - tMinMs) * (W - 2 * MARGIN);
-    // level = line index (fractional between lines); gi = which ladder, for its GROUP_GAP
-    const yOfG = (g, gi = 0) => startY + g * SPACING + gi * GROUP_GAP;
+    // The strip as the editor fits it; the time axis runs over `timeWidthPx` of its pixels.
+    const imgScale = hasImage ? Math.min(STRIP_FIT_W / imageWidthPx, IMG_MAX_H / imageHeightPx) : 0;
+    const stripH = hasImage ? imageHeightPx * imgScale : NO_IMAGE_STRIP_H;
+    // the same arithmetic as the editor's xOfTime (x0 + (t − t0) / msPerPx, then the image's scale), so the two agree bit for bit
+    const msPerPx = (tMaxMs - tMinMs) / (hasImage ? timeWidthPx : X1 - X0);
+    const xOf = (t) => (hasImage ? X0 + (0 + (t - tMinMs) / msPerPx) * imgScale : X0 + (t - tMinMs) / msPerPx);
 
-    // Lines: each ladder's tiers (+ the closing bottom edge in band style). `base` = index of its first line.
-    const lines = [], bases = [];
-    list.forEach(({ ladder, style: st }, g) => {
-        bases.push(lines.length);
-        const tiers = ladder.tiers || [];
-        for (const t of st === 'lines' ? tiers : [...tiers, '']) {
-            lines.push({ id: `l${lines.length}`, name: t ? (TIER_CATALOG[t]?.label ?? t) : '', y: Math.round(startY + lines.length * SPACING + g * GROUP_GAP), visible: true, group: g });
-        }
-    });
-    const lineIdOfG = (g) => lines[Math.max(0, Math.min(lines.length - 1, Math.round(g)))].id;
-
-    const points = [], connections = [], dedupe = new Map();
-    list.forEach(({ ladder }, gi) => {
-        layoutLadder(ladder, { tMinMs, tMaxMs, xOf, points, connections, dedupe,
-                               yOfLevel: (lv) => yOfG(bases[gi] + lv, gi), lineIdOfLevel: (lv) => lineIdOfG(bases[gi] + lv) });
-    });
-
-    const lastY = yOfG(lines.length - 1, list.length - 1);
-    const canvasHeight = Math.max(LEWIS.H, Math.round(lastY + 70));
     // Letters, titles and captions: the editor draws them itself (ladderMeta),
     // so they stay attached to their ladder when it is edited.
     const ladderMeta = list.map((it, g) => ({ group: g, letter: it.letter || (list.length > 1 ? String.fromCharCode(65 + g) : ''),
                                               title: String(it.title ?? it.label ?? ''), caption: String(it.caption || ''), style: it.style }));
+    // The frame, exactly as the editor builds it from these lines and this meta (brackets are derived there).
+    const layout = makeLayout({
+        stripH, groups: list.map(({ ladder }) => (ladder.tiers?.length ? ladder.tiers : ['A'])),
+        titles: ladderMeta.some(m => m.letter || m.title), captionLines: ladderMeta.map(m => capLines(m.caption)),
+        style: list[0]?.style ?? style, styles: list.map(it => it.style), bracketRows: list.map(() => false), footer: FOOTER,
+    });
+
+    // Lines: each ladder's tiers (+ the closing bottom edge in band style), at the top of their band.
+    const lines = [];
+    list.forEach(({ ladder, style: st }, g) => {
+        const G = layout.groups[g];
+        const tiers = ladder.tiers || [];
+        for (const t of st === 'lines' ? tiers : [...tiers, '']) {
+            lines.push({ id: `l${lines.length}`, name: t ? (TIER_CATALOG[t]?.label ?? t) : '', y: t ? G.bands[t].top : G.bottom, visible: true, group: g });
+        }
+    });
+    // level = line index within the ladder (fractional between lines), as the editor reads it back
+    const levels = (gi) => lines.filter(l => l.group === gi);
+    const yOfLevel = (gi, lv) => {
+        const ys = levels(gi);
+        const i = Math.max(0, Math.min(ys.length - 1, Math.floor(lv)));
+        const f = lv - i, y0 = ys[i].y, y1 = ys[i + 1]?.y ?? y0;
+        return y0 + f * (y1 - y0);
+    };
+    const lineIdOfLevel = (gi, lv) => { const ys = levels(gi); return ys[Math.max(0, Math.min(ys.length - 1, Math.round(lv)))].id; };
+
+    const points = [], connections = [], dedupe = new Map();
+    list.forEach(({ ladder }, gi) => {
+        layoutLadder(ladder, { tMinMs, tMaxMs, xOf, points, connections, dedupe,
+                               yOfLevel: (lv) => yOfLevel(gi, lv), lineIdOfLevel: (lv) => lineIdOfLevel(gi, lv) });
+    });
+
+    const lastY = layout.groups[layout.groups.length - 1].bottom;
+    const canvasHeight = Math.round(layout.height);
     const annotations = [];
     const firstNote = list.length === 1 && !ladderMeta[0].caption ? list[0]?.ladder?.notes?.[0] : null;
     if (firstNote) {
-        annotations.push({ id: 'a0', x: MARGIN, y: Math.min(canvasHeight - 12, lastY + 28),
+        annotations.push({ id: 'a0', x: X0, y: lastY + 28,
                            text: firstNote.slice(0, 140), type: 'text', fontSize: 11, fontColor: '#1e293b' });
     }
     const out = { lines, points, connections, annotations, freeformLines: [], ladderMeta, ladderStyle: list[0]?.style ?? style, canvasHeight,
-                  engine: { name: ENGINE_NAME, version: ENGINE_VERSION } };
+                  layoutVersion: LEWIS.LAYOUT_VERSION, engine: { name: ENGINE_NAME, version: ENGINE_VERSION } };
     if (backgroundImage) {
         out.backgroundImage = backgroundImage;
         out.imageTransform = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
     }
-    // Time calibration: the strip image spans [tMin, tMax] across its full width (renderStripImage);
-    // without an image the ladders span x = MARGIN … W − MARGIN.
+    // Time calibration: the strip image spans [tMin, tMax] across `timeWidthPx` of its pixels (renderStripImage);
+    // without an image the ladders span x = X0 … X1.
     out.calibration = hasImage
         ? { space: 'image', x0Px: 0, t0Ms: tMinMs, msPerPx: (tMaxMs - tMinMs) / timeWidthPx, method: 'generator', confidence: 'measured' }
-        : { space: 'canvas', x0Px: MARGIN, t0Ms: tMinMs, msPerPx: (tMaxMs - tMinMs) / (W - 2 * MARGIN), method: 'schematic', confidence: 'assumed' };
+        : { space: 'canvas', x0Px: X0, t0Ms: tMinMs, msPerPx: (tMaxMs - tMinMs) / (X1 - X0), method: 'schematic', confidence: 'assumed' };
     if (hasImage) out.imageSize = { w: imageWidthPx, h: imageHeightPx };
     if (marks) {
         out.marks = {
