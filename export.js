@@ -30,10 +30,15 @@ export const LEWIS = Object.freeze({ W: 1000, X0: 60, X1: 992, STRIP_FIT_W: 940,
 export const FORMAT = 'ecgdante-laddergram';
 export const FORMAT_VERSION = 2;
 
+// What the reader said outright about one beat travels with it: a saved file must reopen as the same
+// reading, not as the engine's unaided guess at it.
 const beatOut = (b) => ({ id: b.id, qrsOnMs: b.qrsOnMs, qrsOffMs: b.qrsOffMs, rPeakMs: b.rPeakMs ?? null,
                           quality: b.quality || 'normal', qrsWidthMs: b.qrsWidthMs ?? null, source: b.source || 'auto',
-                          conduction: b.conduction ?? null });
-const atrialOut = (a) => ({ id: a.id, tMs: a.tMs, source: a.source || 'auto' });
+                          conduction: b.conduction ?? null,
+                          ...(b.pairedAtrialId ? { pairedAtrialId: String(b.pairedAtrialId) } : {}),
+                          ...(b.retroAtrialId ? { retroAtrialId: String(b.retroAtrialId) } : {}) });
+const atrialOut = (a) => ({ id: a.id, tMs: a.tMs, source: a.source || 'auto',
+                            ...(a.blockedAt === 'AV' || a.blockedAt === 'His' ? { blockedAt: a.blockedAt } : {}) });
 
 export function toLaddergramJson({ filename = null, lead = null, fs = null, durationMs = null, speed = null,
                                    beats, atrial, mechanism, params, tiers = null, ladder, layers = [], title = '', caption = '', style = 'bands', brackets = null }) {
@@ -62,7 +67,8 @@ function cleanBeats(list) {
     return (list || []).filter(b => b && Number.isFinite(b.qrsOnMs) && Number.isFinite(b.qrsOffMs))
         .map(b => ({ ...b, conduction: CONDUCTIONS.includes(b.conduction) ? b.conduction : null }));
 }
-const cleanAtrial = (list) => (list || []).filter(a => a && Number.isFinite(a.tMs));
+const cleanAtrial = (list) => (list || []).filter(a => a && Number.isFinite(a.tMs))
+    .map(a => (a.blockedAt === 'AV' || a.blockedAt === 'His' ? a : { ...a, blockedAt: null }));
 
 /** Validate + normalise a file written by toLaddergramJson (v1 or v2). Throws on garbage. */
 export function fromLaddergramJson(obj) {

@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.9.0';
+export const ENGINE_VERSION = '1.10.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -616,9 +616,16 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
     // Retrograde P of an ectopic beat: claim a marked P near qrsOn + ectopicVA.
     const retroOf = new Map();          // beatId → atrial (or {tMs} if derived)
     const claimedRetro = new Set();
+    // A beat the reader has pointed at its own retrograde P: that P is the one it went back up to,
+    // whatever the VA parameter would have found, and it is taken before any of them are guessed.
+    for (const b of beats) {
+        if (!b.retroAtrialId || pairs.has(b.id)) continue;
+        const hit = atrial.find(a => a.id === b.retroAtrialId && !beatOfA.has(a.id));
+        if (hit) { claimedRetro.add(hit.id); retroOf.set(b.id, hit); }
+    }
     if (P.ectopicVA != null) {
         for (const b of beats) {
-            if (pairs.has(b.id)) continue;
+            if (pairs.has(b.id) || retroOf.has(b.id)) continue;
             const want = b.qrsOnMs + P.ectopicVA;
             const hit = atrial.find(a => !beatOfA.has(a.id) && !claimedRetro.has(a.id) && Math.abs(a.tMs - want) <= DEDUP_MS);
             if (hit) { claimedRetro.add(hit.id); retroOf.set(b.id, hit); }
