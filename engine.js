@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.13.1';
+export const ENGINE_VERSION = '1.14.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {

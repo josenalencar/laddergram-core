@@ -338,6 +338,7 @@ export function drawPathPx(ctx, p, labelled) {
             let [lx, ly] = p.labelAnchor === 'end-right' ? [ex + 5 + ldx, ey + 11 + ldy] : [sx + 4 + ldx, sy + 10 + ldy];
             const lines = p.label.split('\n'), w = Math.max(...lines.map(l => ctx.measureText(l).width));
             labelled.boxes = labelled.boxes || [];
+            labelled.ids = labelled.ids || [];
             // Anchored text claimed its space without ever checking it. Nudge it down a line at a time
             // until it clears the tier lines and the labels already placed, then give up gracefully.
             const boxAt = (y) => [lx - 2, y - 9, lx + w + 2, y + lines.length * 11];
@@ -345,6 +346,7 @@ export function drawPathPx(ctx, p, labelled) {
                 || (labelled.rules || []).some(r => r > b[1] - 1 && r < b[3] + 1);
             for (let k = 0; k < 3 && clash(boxAt(ly)); k++) ly += 11;
             labelled.boxes.push(boxAt(ly));
+            labelled.ids.push(p.id ?? null);
             p.label.split('\n').forEach((ln, i) => ctx.fillText(ln, lx, ly + i * 11));
             return;
         }
@@ -355,6 +357,7 @@ export function drawPathPx(ctx, p, labelled) {
         const tw = ctx.measureText(p.label).width;
         const off0 = 9 + (tw / 2) * Math.abs(dy) / len;
         labelled.boxes = labelled.boxes || [];
+        labelled.ids = labelled.ids || [];
         const rules = labelled.rules || [];
         const hits = (b) => labelled.boxes.some(q => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3]);
         const onRule = (b) => rules.some(y => y > b[1] - 1 && y < b[3] + 1);
@@ -375,6 +378,7 @@ export function drawPathPx(ctx, p, labelled) {
         if (!box && fallback) ({ mx, my, box } = fallback);
         if (!box) return;
         labelled.boxes.push(box);
+        labelled.ids.push(p.id ?? null);
         labelled.add(p.label);
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(p.label, mx, my);
@@ -524,6 +528,7 @@ export function drawResolvedGroup(ctx, resolved, { x0, rules = [] } = {}) {
     const labelled = new Set();
     labelled.minX = x0 + 12;
     labelled.rules = rules;                     // the tier lines of this group: a label never sits on one
+    labelled.ids = [];                          // which path each placed label belongs to, box for box
     for (const p of resolved.paths) drawPathPx(ctx, p, labelled);
     for (const e of resolved.events) drawEventPx(ctx, e);
     return labelled;
@@ -620,7 +625,10 @@ export function resolveMarkers({ beats = [], atrial = [] }, view, layout, { sele
 
 /** One marker: a line (or tick) over the tracing, a dashed guide down to its tier, the handle at the foot. */
 export function drawMarkerPx(ctx, m, stripH, markerLines) {
-    const { x, color, sel, user, tierTop } = m;
+    // dy drops a handle into a second row. A P onset and a QRS onset can fall at the same millisecond on a
+    // fast rhythm, and two triangles at one x are one triangle: neither can be seen or aimed at.
+    const { x, color, sel, user, tierTop, dy = 0 } = m;
+    const foot = stripH + dy;
     ctx.strokeStyle = sel ? COL_SEL : color;
     ctx.globalAlpha = sel ? 1 : 0.55;
     ctx.lineWidth = sel ? 2.2 : 1.2;
@@ -628,10 +636,11 @@ export function drawMarkerPx(ctx, m, stripH, markerLines) {
     ctx.beginPath(); ctx.moveTo(x, markerLines || sel ? 0 : stripH - 16); ctx.lineTo(x, stripH); ctx.stroke();
     ctx.globalAlpha = 0.35; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, stripH); ctx.lineTo(x, tierTop); ctx.stroke();
-    ctx.setLineDash([]); ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
     // handle at the strip foot: filled = auto, hollow = user
     ctx.fillStyle = sel ? COL_SEL : color;
-    ctx.beginPath(); ctx.moveTo(x, stripH - 9); ctx.lineTo(x - 5, stripH); ctx.lineTo(x + 5, stripH); ctx.closePath();
+    ctx.beginPath(); ctx.moveTo(x, foot - 9); ctx.lineTo(x - 5, foot); ctx.lineTo(x + 5, foot); ctx.closePath();
     if (user) { ctx.fillStyle = COLORS.HOLLOW; ctx.fill(); ctx.strokeStyle = sel ? COL_SEL : color; ctx.lineWidth = 1.5; ctx.stroke(); }
     else ctx.fill();
 }
