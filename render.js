@@ -335,25 +335,44 @@ export function drawPathPx(ctx, p, labelled) {
             // (the free corner between a vertical V line and the path leaving it)
             labelled.add(p.label);
             ctx.textAlign = 'left';
-            const [lx, ly] = p.labelAnchor === 'end-right' ? [ex + 5 + ldx, ey + 11 + ldy] : [sx + 4 + ldx, sy + 10 + ldy];
+            let [lx, ly] = p.labelAnchor === 'end-right' ? [ex + 5 + ldx, ey + 11 + ldy] : [sx + 4 + ldx, sy + 10 + ldy];
             const lines = p.label.split('\n'), w = Math.max(...lines.map(l => ctx.measureText(l).width));
-            (labelled.boxes = labelled.boxes || []).push([lx - 2, ly - 9, lx + w + 2, ly + lines.length * 11]);
+            labelled.boxes = labelled.boxes || [];
+            // Anchored text claimed its space without ever checking it. Nudge it down a line at a time
+            // until it clears the tier lines and the labels already placed, then give up gracefully.
+            const boxAt = (y) => [lx - 2, y - 9, lx + w + 2, y + lines.length * 11];
+            const clash = (b) => labelled.boxes.some(q => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3])
+                || (labelled.rules || []).some(r => r > b[1] - 1 && r < b[3] + 1);
+            for (let k = 0; k < 3 && clash(boxAt(ly)); k++) ly += 11;
+            labelled.boxes.push(boxAt(ly));
             p.label.split('\n').forEach((ln, i) => ctx.fillText(ln, lx, ly + i * 11));
             return;
         }
-        // clear the line: half the text width more when the segment is steep. Preferred side first, then the
-        // other; a label that would run under the tier names or onto another label goes to a later path.
+        // Clear of the line it labels, of the tier lines, of the tier names and of the other labels: half
+        // the text width more when the segment is steep, then either side, then along the path. A word that
+        // sits on a tier line is unreadable, so the tier lines are obstacles like anything else — but the
+        // last resort is still to draw it somewhere rather than to drop it in silence.
         const tw = ctx.measureText(p.label).width;
         const off0 = 9 + (tw / 2) * Math.abs(dy) / len;
         labelled.boxes = labelled.boxes || [];
-        let mx, my, box = null;
-        for (const side of [p.labelSide ?? 1, -(p.labelSide ?? 1)]) {
-            const x = (sx + ex) / 2 + nx * off0 * side + ldx, y = (sy + ey) / 2 + ny * off0 * side + ldy;
-            const b = [x - tw / 2 - 2, y - 7, x + tw / 2 + 2, y + 7];
-            if (x - tw / 2 < (labelled.minX ?? -Infinity) - 8) continue;
-            if (labelled.boxes.some(q => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3])) continue;
-            mx = x; my = y; box = b; break;
+        const rules = labelled.rules || [];
+        const hits = (b) => labelled.boxes.some(q => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3]);
+        const onRule = (b) => rules.some(y => y > b[1] - 1 && y < b[3] + 1);
+        let mx, my, box = null, fallback = null;
+        // along the path first at its middle, then either side of the thirds: a label pushed along the
+        // line still reads as belonging to it, where one pushed far off it does not
+        for (const at of [0.5, 0.34, 0.66]) {
+            for (const side of [p.labelSide ?? 1, -(p.labelSide ?? 1)]) {
+                const x = sx + dx * at + nx * off0 * side + ldx, y = sy + dy * at + ny * off0 * side + ldy;
+                const b = [x - tw / 2 - 2, y - 7, x + tw / 2 + 2, y + 7];
+                if (x - tw / 2 < (labelled.minX ?? -Infinity) - 8) continue;
+                if (!fallback) { fallback = { mx: x, my: y, box: b }; }
+                if (hits(b) || onRule(b)) continue;
+                mx = x; my = y; box = b; break;
+            }
+            if (box) break;
         }
+        if (!box && fallback) ({ mx, my, box } = fallback);
         if (!box) return;
         labelled.boxes.push(box);
         labelled.add(p.label);
@@ -406,6 +425,16 @@ export function wrapLines(ctx, s, w, max) {
     if (lines.length < max && cur) lines.push(cur);
     if (lines.length === max && words.join(' ').length > lines.join(' ').length) lines[max - 1] = lines[max - 1].replace(/\s*\S*$/, ' …');
     return lines;
+}
+
+/** The y of every line this group draws across the page: what a label must not be written on top of. */
+export function tierRules(layout, g) {
+    const G = layout.groups[g];
+    if (!G) return [];
+    const lineStyle = (G.style ?? layout.style) === 'lines';
+    const ys = G.tiers.map(t => G.bands[t].top);
+    if (!lineStyle) ys.push(G.bottom);
+    return ys;
 }
 
 /**
@@ -491,9 +520,10 @@ export function resolveGroup(ladder, view, layout, g, { selected = null, visible
 }
 
 /** Paths first, then events, so dots sit on top of lines. Labels are placed as the paths are drawn. */
-export function drawResolvedGroup(ctx, resolved, { x0 } = {}) {
+export function drawResolvedGroup(ctx, resolved, { x0, rules = [] } = {}) {
     const labelled = new Set();
     labelled.minX = x0 + 12;
+    labelled.rules = rules;                     // the tier lines of this group: a label never sits on one
     for (const p of resolved.paths) drawPathPx(ctx, p, labelled);
     for (const e of resolved.events) drawEventPx(ctx, e);
     return labelled;
@@ -565,7 +595,7 @@ export function drawLadderGroup(ctx, view, layout, g, ladder, { selected = null,
     if (!G) return;
     drawTierGroup(ctx, layout, g, { x0, x1, letter, title, caption });
     if (!ladder) return;
-    drawResolvedGroup(ctx, resolveGroup(ladder, view, layout, g, { selected, visible, x0, x1 }), { x0 });
+    drawResolvedGroup(ctx, resolveGroup(ladder, view, layout, g, { selected, visible, x0, x1 }), { x0, rules: tierRules(layout, g) });
     // a beat carrying the PR bracket does not also get the plain PR text
     const bracketQ = (brackets || []).filter(b => b.row === 'strip').map(b => b.t1);
     if (showIntervals) drawIntervals(ctx, view, layout, ladder, beats, atrial, visible, bracketQ);
@@ -658,14 +688,20 @@ export function drawFooter(ctx, x0, bottom, lines) {
  * @param o.lead        the lead name in the label column (o.strip.label otherwise)
  * @param o.tags        [{ text, y, font, color? }] — the lines under the lead name (speed, gain), when the
  *                      caller knows them; otherwise they follow o.bare and o.view.printScale as before
+ * @param o.xEnd        where the ladder ends, when that is not the page's right edge (a strip that does
+ *                      not fill the width): tiers, paper and the clip stop there
  * @returns { labels: Set[] }  the labels placed per group (their boxes), for hit-testing
  */
 export function drawFrame(ctx, o) {
     const { view, layout, cssW, strip, beats = [], atrial = [], ladder, layers = [], selected = null,
             showIntervals = true, markerLines = true, footerText = null, current = {}, bare = false,
-            groupsPx = null, paintStrip = null, markersPx = null, footerLines = null, lead = null, tags = null } = o;
+            groupsPx = null, paintStrip = null, markersPx = null, footerLines = null, lead = null, tags = null,
+            xEnd = null } = o;
     const H = layout.height;
-    const x0 = view.labelW, x1 = cssW;
+    // Where the ladder ends. Normally the page's right edge; an editor whose strip does not fill the page
+    // passes the strip's own edge, so tiers, paper and marks stop where the tracing stops rather than
+    // running on over blank paper.
+    const x0 = view.labelW, x1 = Math.min(cssW, xEnd ?? cssW);
     ctx.save();
     ctx.fillStyle = COLORS.PAGE; ctx.fillRect(0, 0, cssW, H);
     if (paintStrip) paintStrip(ctx, { x0, x1, stripH: layout.stripH });
@@ -686,9 +722,11 @@ export function drawFrame(ctx, o) {
 
     const placed = [];
     if (groupsPx) {
+        // Frames for every ladder first, then the ladders themselves: a caption or a label that hangs below
+        // its own group used to be painted over by the next group's band fill.
+        groupsPx.forEach((G, g) => drawTierGroup(ctx, layout, g, { x0, x1, letter: G.letter, title: G.title, caption: G.caption }));
         groupsPx.forEach((G, g) => {
-            drawTierGroup(ctx, layout, g, { x0, x1, letter: G.letter, title: G.title, caption: G.caption });
-            placed.push(drawResolvedGroup(ctx, G.resolved ?? { paths: [], events: [] }, { x0 }));
+            placed.push(drawResolvedGroup(ctx, G.resolved ?? { paths: [], events: [] }, { x0, rules: tierRules(layout, g) }));
             if (G.bracketsPx?.length) drawBracketsPx(ctx, G.bracketsPx);
         });
     } else {

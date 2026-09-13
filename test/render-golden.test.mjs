@@ -36,14 +36,25 @@ function fingerprint(fig) {
         selected: null, showIntervals: false, markerLines: false, footerText: null, bare: true,
     });
     const log = ctx.__log;
-    return { hash: createHash('sha256').update(JSON.stringify(log)).digest('hex'), calls: log.length, log };
+    // A word written across a tier line is unreadable, so no figure may contain one. The rules are the
+    // same ys drawTierGroup strokes; a path label is any fillText made in the path-label font.
+    const rules = layout.groups.flatMap((_, g) => R.tierRules(layout, g));
+    const onRule = [];
+    let font = '';
+    for (const [m, a] of log) {
+        if (m === '=font') font = a[0];
+        else if (m === 'fillText' && font === R.FONTS.pathLabel && rules.some(r => Math.abs(r - a[2]) < 8)) onRule.push(`${a[0]}@${Math.round(a[2])}`);
+    }
+    return { hash: createHash('sha256').update(JSON.stringify(log)).digest('hex'), calls: log.length, log, onRule };
 }
 
 let pass = 0, fail = 0;
 const stored = existsSync(FIX) ? JSON.parse(readFileSync(FIX, 'utf8')) : {};
 const next = {};
 for (const fig of FIGURES) {
-    const { hash, calls, log } = fingerprint(fig);
+    const { hash, calls, log, onRule } = fingerprint(fig);
+    if (onRule.length) { fail++; console.error(`  FAIL     ${fig.id}: label on a tier line — ${onRule.join(', ')}`); }
+    else pass++;
     next[fig.id] = { hash, calls };
     if (fig.id === 'fig2') next[fig.id].log = log;          // one readable log, so a diff says what moved
     const want = stored[fig.id]?.hash;
