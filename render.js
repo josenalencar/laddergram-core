@@ -590,10 +590,12 @@ export function drawBracketsPx(ctx, list) {
  * tier–time output. Group 0 is the editable ladder (selection highlight, intervals); others are read-only
  * layers with their title above.
  */
-export function drawLadderGroup(ctx, view, layout, g, ladder, { selected = null, showIntervals = false, x0, x1, visible, title = null, letter = null, caption = null, beats = [], atrial = [], brackets = null } = {}) {
+export function drawLadderGroup(ctx, view, layout, g, ladder, { selected = null, showIntervals = false, x0, x1, visible, title = null, letter = null, caption = null, beats = [], atrial = [], brackets = null, frameDrawn = false } = {}) {
     const G = layout.groups[g];
     if (!G) return;
-    drawTierGroup(ctx, layout, g, { x0, x1, letter, title, caption });
+    // The caller may have drawn every frame already, so that no group's band fill lands on the group
+    // above's text. Left alone it draws its own, as it always did.
+    if (!frameDrawn) drawTierGroup(ctx, layout, g, { x0, x1, letter, title, caption });
     if (!ladder) return;
     drawResolvedGroup(ctx, resolveGroup(ladder, view, layout, g, { selected, visible, x0, x1 }), { x0, rules: tierRules(layout, g) });
     // a beat carrying the PR bracket does not also get the plain PR text
@@ -730,7 +732,10 @@ export function drawFrame(ctx, o) {
             if (G.bracketsPx?.length) drawBracketsPx(ctx, G.bracketsPx);
         });
     } else {
-        const common = { x0, x1, visible, beats, atrial };
+        const common = { x0, x1, visible, beats, atrial, frameDrawn: true };
+        // Same order as the groupsPx branch above: every frame, then every ladder.
+        drawTierGroup(ctx, layout, 0, { x0, x1, letter: current.letter ?? null, title: current.title ?? null, caption: current.caption ?? null });
+        layers.forEach((l, i) => drawTierGroup(ctx, layout, i + 1, { x0, x1, letter: l.letter ?? null, title: l.title ?? l.label ?? null, caption: l.caption ?? null }));
         drawLadderGroup(ctx, view, layout, 0, ladder, { ...common, selected, showIntervals, title: current.title, letter: current.letter, caption: current.caption, brackets: current.brackets });
         layers.forEach((l, i) => drawLadderGroup(ctx, view, layout, i + 1, l.ladder, { ...common, title: l.title ?? l.label, letter: l.letter, caption: l.caption, brackets: l.brackets }));
     }
