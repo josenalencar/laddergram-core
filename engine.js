@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.14.0';
+export const ENGINE_VERSION = '1.15.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -136,28 +136,28 @@ export const DEFAULT_PARAMS = Object.freeze({
 
 /** Labels/units for the params panel. `adv` = hidden under "advanced". */
 export const PARAM_INFO = {
-    SACT: { label: 'SA conduction', unit: 'ms', normal: [45, 125], ref: 'josephson', what: 'sinus-node discharge → P onset: the slope across the SN tier' },
-    PA: { label: 'PA (intra-atrial)', unit: 'ms', normal: [25, 55], ref: 'josephson', what: 'P onset → AV-node entry: used to estimate AH (PR − PA − HV); the atrial tier itself is drawn instantaneous, so the AV band spans PA + AH' },
-    HV: { label: 'HV', unit: 'ms', normal: [35, 55], ref: 'josephson', what: 'His → QRS onset: the His line ends this long before the V line' },
-    AHmin: { label: 'AH minimum', unit: 'ms', normal: [55, 125], normalOf: 'AH', ref: 'josephson', what: 'the fastest the AV node conducts; a PR shorter than PA + AH min + HV is drawn as pre-excitation' },
-    PRmin: { label: 'PR min (pairing)', unit: 'ms', adv: true, what: 'a P closer than this to a QRS is not the one that conducted it' },
-    PRmax: { label: 'PR max (pairing)', unit: 'ms', adv: true, what: 'a P further than this from a QRS is not the one that conducted it' },
-    VA: { label: 'VA (QRS onset → retro P)', unit: 'ms', threshold: { at: 70, meaning: '≤ 70 ms favours typical AVNRT; > 70 ms allows orthodromic AVRT' }, ref: 'issa', what: 'QRS onset → retrograde P onset: where the returning wave reaches the atrium' },
-    apVdelay: { label: 'QRS onset → AP ventricular end', unit: 'ms', adv: true, what: 'QRS onset → the ventricular end of the accessory pathway' },
-    apToAV: { label: 'Retro A → AV-node entry', unit: 'ms', adv: true, what: 'retrograde atrial activation → the next entry into the AV node (AH estimate only; the atrium is drawn instantaneous)' },
-    vExit: { label: 'PVC focus → His exit', unit: 'ms', adv: true, what: 'ectopic focus → exit into the His–Purkinje system (retrograde)' },
-    ectopicVA: { label: 'Ectopic retro VA (empty = concealed)', unit: 'ms', what: 'ectopic QRS onset → retrograde P; empty = the wave dies in the AV node' },
-    wideQrsMs: { label: 'Wide QRS from', unit: 'ms', adv: true, what: 'a QRS at least this wide, with no bundle-branch block marked, is drawn as ventricular' },
-    fWaveMs: { label: 'F–F override (empty = from your F marks)', unit: 'ms', adv: true, what: 'fixed F–F cycle instead of the one fitted to your F marks' },
-    fPhaseMs: { label: 'F phase override (one F at)', unit: 'ms', adv: true, what: 'time of one F wave, to shift the fitted F waves' },
-    fibMeanMs: { label: 'Mean f–f cycle', unit: 'ms', what: 'spacing of the schematic f waves' },
-    concealDepth: { label: 'Concealed depth (0–1)', unit: '', adv: true, what: 'how far into the AV node a concealed retrograde wave is drawn' },
-    blockDepth: { label: 'Block depth (0–1)', unit: '', adv: true, what: 'how far into the AV node a blocked P is drawn' },
-    blockBelowHis: { label: 'Block below the His (0 = AV node, 1 = infra-His)', unit: '', what: 'where the block sits: 0 = AV node, 1 = below the His (complete block: ventricular escape; 2:1 or other drops that are not Wenckebach: the His is recorded and the ventricle is not reached)' },
-    jtNodeMs: { label: 'Focus → His (in the node)', unit: 'ms', adv: true, what: 'junctional focus → His entry' },
-    apAnteMs: { label: 'Pathway conduction (atrial end → delta wave)', unit: 'ms', what: 'atrial end of the pathway → delta wave: the pre-excited descent' },
-    vhMs: { label: 'QRS onset → retrograde His (through ventricular muscle)', unit: 'ms', adv: true, what: 'QRS onset → retrograde His: the slow return through ventricular muscle' },
-    hPrimeLead: { label: 'H′ before the P reaches the node', unit: 'ms', what: 'how long before the P reaches the node the hidden H′ fires' },
+    SACT: { kind: 'assumed', needsTier: ['SN'], label: 'SA conduction', unit: 'ms', normal: [45, 125], ref: 'josephson', what: 'sinus-node discharge → P onset: the slope across the SN tier' },
+    PA: { kind: 'assumed', label: 'PA (intra-atrial)', unit: 'ms', normal: [25, 55], ref: 'josephson', what: 'P onset → AV-node entry: used to estimate AH (PR − PA − HV); the atrial tier itself is drawn instantaneous, so the AV band spans PA + AH' },
+    HV: { kind: 'assumed', needsTier: ['His', 'RBB'], label: 'HV', unit: 'ms', normal: [35, 55], ref: 'josephson', what: 'His → QRS onset: the His line ends this long before the V line' },
+    AHmin: { kind: 'assumed', label: 'AH minimum', unit: 'ms', normal: [55, 125], normalOf: 'AH', ref: 'josephson', what: 'the fastest the AV node conducts; a PR shorter than PA + AH min + HV is drawn as pre-excitation' },
+    PRmin: { kind: 'pairing', label: 'PR min (pairing)', unit: 'ms', adv: true, what: 'a P closer than this to a QRS is not the one that conducted it' },
+    PRmax: { kind: 'pairing', label: 'PR max (pairing)', unit: 'ms', adv: true, what: 'a P further than this from a QRS is not the one that conducted it' },
+    VA: { kind: 'clinical', label: 'VA (QRS onset → retro P)', unit: 'ms', threshold: { at: 70, meaning: '≤ 70 ms favours typical AVNRT; > 70 ms allows orthodromic AVRT' }, ref: 'issa', what: 'QRS onset → retrograde P onset: where the returning wave reaches the atrium' },
+    apVdelay: { kind: 'assumed', label: 'QRS onset → AP ventricular end', unit: 'ms', adv: true, what: 'QRS onset → the ventricular end of the accessory pathway' },
+    apToAV: { kind: 'orphan', label: 'Retro A → AV-node entry', unit: 'ms', adv: true, what: 'retrograde atrial activation → the next entry into the AV node (AH estimate only; the atrium is drawn instantaneous)' },
+    vExit: { kind: 'assumed', label: 'PVC focus → His exit', unit: 'ms', adv: true, what: 'ectopic focus → exit into the His–Purkinje system (retrograde)' },
+    ectopicVA: { kind: 'clinical', label: 'Ectopic retro VA (empty = concealed)', unit: 'ms', what: 'ectopic QRS onset → retrograde P; empty = the wave dies in the AV node' },
+    wideQrsMs: { kind: 'pairing', label: 'Wide QRS from', unit: 'ms', adv: true, what: 'a QRS at least this wide, with no bundle-branch block marked, is drawn as ventricular' },
+    fWaveMs: { kind: 'schematic', label: 'F–F override (empty = from your F marks)', unit: 'ms', adv: true, what: 'fixed F–F cycle instead of the one fitted to your F marks' },
+    fPhaseMs: { kind: 'schematic', label: 'F phase override (one F at)', unit: 'ms', adv: true, what: 'time of one F wave, to shift the fitted F waves' },
+    fibMeanMs: { kind: 'schematic', label: 'Mean f–f cycle', unit: 'ms', what: 'spacing of the schematic f waves' },
+    concealDepth: { kind: 'geometry', label: 'Concealed depth (0–1)', unit: '', adv: true, what: 'how far into the AV node a concealed retrograde wave is drawn' },
+    blockDepth: { kind: 'geometry', label: 'Block depth (0–1)', unit: '', adv: true, what: 'how far into the AV node a blocked P is drawn' },
+    blockBelowHis: { kind: 'assumed', label: 'Block below the His (0 = AV node, 1 = infra-His)', unit: '', what: 'where the block sits: 0 = AV node, 1 = below the His (complete block: ventricular escape; 2:1 or other drops that are not Wenckebach: the His is recorded and the ventricle is not reached)' },
+    jtNodeMs: { kind: 'assumed', label: 'Focus → His (in the node)', unit: 'ms', adv: true, what: 'junctional focus → His entry' },
+    apAnteMs: { kind: 'assumed', label: 'Pathway conduction (atrial end → delta wave)', unit: 'ms', what: 'atrial end of the pathway → delta wave: the pre-excited descent' },
+    vhMs: { kind: 'assumed', needsTier: ['His'], label: 'QRS onset → retrograde His (through ventricular muscle)', unit: 'ms', adv: true, what: 'QRS onset → retrograde His: the slow return through ventricular muscle' },
+    hPrimeLead: { kind: 'assumed', label: 'H′ before the P reaches the node', unit: 'ms', what: 'how long before the P reaches the node the hidden H′ fires' },
 };
 
 const ALWAYS = ['SACT', 'PA', 'HV', 'AHmin', 'PRmin', 'PRmax', 'wideQrsMs', 'concealDepth', 'blockDepth'];
@@ -222,7 +222,7 @@ function lcg(seed) {
  * A PR shorter than this is not conduction, whatever the rest of the strip says. Pre-excitation can be
  * very short, so this sits below the shortest accessory-pathway PR rather than at the nodal floor.
  */
-const PR_FLOOR_MS = 40;
+export const PR_FLOOR_MS = 40;
 
 /**
  * Which P conducted to which QRS.
@@ -306,8 +306,8 @@ export function measureIntervals(beats, atrial, pairs, params) {
             beatId: b.id,
             RRms: i > 0 ? r1(b.qrsOnMs - B[i - 1].qrsOnMs) : null,
             PRms: PR,
-            AHms: PR != null ? r1(PR - P.PA - P.HV) : null,
-            HVms: P.HV,
+            AHms: PR != null ? r1(PR - P.PA - (b.params?.HV ?? P.HV)) : null,
+            HVms: b.params?.HV ?? P.HV,
             VAms: null,
             conduction: b.conduction ?? null,
             flags: [],
@@ -398,6 +398,8 @@ function makeBuilder(mechanism, P, T) {
  * conduct through the His–Purkinje system the way the sinus beats around it do — and those win for that
  * beat alone, leaving the rest of the ladder on the ladder's own values.
  */
+const beatParams = (B, b) => (b && b.params ? { ...B.P, ...b.params } : B.P);
+
 function junctionTimes(B, qrsOn, own = null) {
     const T = B.T;
     const P = own ? { ...B.P, ...own } : B.P;
@@ -515,7 +517,8 @@ function atrialRetro(B, tA, o = {}) {
 
 /** Junctional focus (His tier, or low in the AV node when His is hidden). retroTo = retro P time or null. */
 function junctionalFocus(B, b, retroTo, { retro = true } = {}) {
-    const { P, T } = B;
+    const { T } = B;
+    const P = beatParams(B, b);
     const tF = b.qrsOnMs - P.HV;
     const J = junctionTimes(B, b.qrsOnMs, b.params);
     if (T.hasHis) {
@@ -545,7 +548,8 @@ function vExit(B, b, t, role = 'ventricle-retro') {
 
 /** Ventricular focus (PVC / ventricular escape). retroTo as above. */
 function ventricularFocus(B, b, retroTo, { retro = true } = {}) {
-    const { P, T } = B;
+    const { T } = B;
+    const P = beatParams(B, b);
     B.ev('V', b.qrsOnMs, 0.5, { style: 'asterisk', role: 'focus-ventricular', beatId: b.id, source: b.source || 'auto' });
     B.seg(['V', b.qrsOnMs, 0.5], ['V', b.qrsOnMs, 1], { beatId: b.id, role: 'ventricle' });
     if (!retro) return null;
@@ -637,14 +641,16 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
         const hit = atrial.find(a => a.id === b.retroAtrialId && !beatOfA.has(a.id));
         if (hit) { claimedRetro.add(hit.id); retroOf.set(b.id, hit); }
     }
-    if (P.ectopicVA != null) {
-        for (const b of beats) {
-            if (pairs.has(b.id) || retroOf.has(b.id)) continue;
-            const want = b.qrsOnMs + (b.params?.ectopicVA ?? P.ectopicVA);
-            const hit = atrial.find(a => !beatOfA.has(a.id) && !claimedRetro.has(a.id) && Math.abs(a.tMs - want) <= DEDUP_MS);
-            if (hit) { claimedRetro.add(hit.id); retroOf.set(b.id, hit); }
-            else retroOf.set(b.id, { tMs: want });
-        }
+    // A beat may carry its own retrograde VA: it is drawn with a retro P even when the ladder conceals
+    // them, and concealed (its own value empty) even when the ladder draws them.
+    for (const b of beats) {
+        if (pairs.has(b.id) || retroOf.has(b.id)) continue;
+        const va = b.params && 'ectopicVA' in b.params ? b.params.ectopicVA : P.ectopicVA;
+        if (va == null) continue;
+        const want = b.qrsOnMs + va;
+        const hit = atrial.find(a => !beatOfA.has(a.id) && !claimedRetro.has(a.id) && Math.abs(a.tMs - want) <= DEDUP_MS);
+        if (hit) { claimedRetro.add(hit.id); retroOf.set(b.id, hit); }
+        else retroOf.set(b.id, { tMs: want });
     }
 
     // AH per conducted P, then the conduction pattern (which decides where a

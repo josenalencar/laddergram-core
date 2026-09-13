@@ -193,5 +193,35 @@ console.log('\ncontinue: jitter, both directions, groups');
     ok('negative start: continued back to the first beat of the strip', Math.min(...c.beats.map(b => b.qrsOnMs)) < sh(beats[1].qrsOnMs) + 30);
 }
 
+console.log('\nthe pairing window the ladder is drawn with');
+{
+    // A very long first-degree block: outside the default window, inside a widened one.
+    const beats = [0, 900, 1800, 2700].map((t, i) => ({ id: 'b' + i, qrsOnMs: t, qrsOffMs: t + 90, quality: 'normal' }));
+    const atrial = [0, 900, 1800, 2700].map((t, i) => ({ id: 'a' + i, tMs: t - 650 }));
+    const dflt = measureRhythm(beats, atrial);
+    const wide = measureRhythm(beats, atrial, { PRmax: 800 });
+    ok('PR 650: not paired in the default window', !dflt.prFixed);
+    ok('PR 650: paired when the window is widened', wide.prFixed === true && wide.relation === '1:1');
+    ok('PR 650: complete block ruled out only with the window', plausibility(beats, atrial).verdicts.avb3.status !== 'excluded'
+        && plausibility(beats, atrial, { PRmax: 800 }).verdicts.avb3.status === 'excluded');
+    ok('PR 650: the suggestion follows the window', suggestReading(beats, atrial, {}, { PRmax: 800 }).id === 'avnodal');
+}
+{
+    // A short PR: PRmin comes down to keep it conducting.
+    const short = [0, 900, 1800, 2700].map((t, i) => ({ id: 'b' + i, qrsOnMs: t, qrsOffMs: t + 90, quality: 'normal' }));
+    const shortA = [0, 900, 1800, 2700].map((t, i) => ({ id: 'a' + i, tMs: t - 90 }));
+    const pp = plausibleParams('avnodal', short, shortA);
+    ok('PR 90: PRmin measured down to 70', pp.params.PRmin === 70 && pp.source.PRmin === 'measured');
+    const normalA = [0, 900, 1800, 2700].map((t, i) => ({ id: 'a' + i, tMs: t - 160 }));
+    ok('PR 160: PRmin left alone', plausibleParams('avnodal', short, normalA).params.PRmin === undefined);
+}
+{
+    // Antidromic AVRT, 1:1: the pre-excited descent is the rest of the cycle.
+    const beats = [0, 400, 800, 1200].map((t, i) => ({ id: 'b' + i, qrsOnMs: t, qrsOffMs: t + 150, quality: 'normal' }));
+    const atrial = [0, 400, 800, 1200].map((t, i) => ({ id: 'a' + i, tMs: t + 150 }));
+    const pp = plausibleParams('avrtAnti', beats, atrial);
+    ok(`avrtAnti: apAnteMs measured (${pp.params.apAnteMs} ms, cycle 400 − RP 150)`, pp.source.apAnteMs === 'measured' && Math.abs(pp.params.apAnteMs - 250) <= 10);
+}
+
 console.log(`\n${pass} ok, ${fail} fail`);
 process.exit(fail ? 1 : 0);

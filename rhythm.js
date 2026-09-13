@@ -5,7 +5,7 @@
 //   plausibleParams   — per-mechanism timings: measured from the marks when they can be, typical otherwise
 //   continueRhythm    — extend a pattern of 2–3 marked beats (and their P waves) to the end of the strip
 // Pure functions; the thresholds are the textbook ones (Josephson; Issa, Miller & Zipes).
-import { DEFAULT_PARAMS, MECHANISMS, pairAtrialToBeats } from './engine.js';
+import { DEFAULT_PARAMS, MECHANISMS, PR_FLOOR_MS, pairAtrialToBeats } from './engine.js';
 
 export const VA_AP_MIN_MS = 70;      // VA ≤ 70 ms: too short for a circuit through the ventricle and a pathway
 export const WIDE_QRS_MS = 120;
@@ -31,8 +31,10 @@ const ectopic = (b) => b.quality === 'pvc';
 /**
  * The rhythm as the marks show it. P waves only count where the user marked P waves
  * (cycles outside the marked P span are "not looked at", not "no P").
+ * `params` is the pairing window the ladder is drawn with (PRmin / PRmax); without it the
+ * defaults are used, so a strip read with a widened window is measured with that window too.
  */
-export function measureRhythm(beats = [], atrial = []) {
+export function measureRhythm(beats = [], atrial = [], params = null) {
     const B = beats.slice().sort(byQ), A = atrial.slice().sort(byT);
     const n = B.length;
     const rrAll = B.slice(1).map((b, i) => b.qrsOnMs - B[i].qrsOnMs);
@@ -97,7 +99,7 @@ export function measureRhythm(beats = [], atrial = []) {
     const ones = cycles.filter(c => c.ps.length === 1);
 
     // PR of the P that conducted each QRS (nearest preceding P in the pairing window)
-    const { pairs } = pairAtrialToBeats(B, A, DEFAULT_PARAMS);
+    const { pairs } = pairAtrialToBeats(B, A, params ? { ...DEFAULT_PARAMS, ...params } : DEFAULT_PARAMS);
     const aT = new Map(A.map(a => [a.id, a.tMs]));
     const prs = B.filter(b => !ect(b) && pairs.has(b.id)).map(b => b.qrsOnMs - aT.get(pairs.get(b.id)));
     out.prSD = prs.length >= 2 ? Math.round(sd(prs)) : null;
@@ -144,8 +146,8 @@ const AVRT_FAMILY = ['avrt', 'pjrt', 'avrtAnti'];
 const SVT_REGULAR = ['avnrt', 'avrt', 'pjrt', 'at', 'jt', 'avrtAnti'];
 
 /** Every mechanism → { status: 'ok' | 'caution' | 'excluded', reasons: [] }, plus the rhythm and a one-line summary. */
-export function plausibility(beats = [], atrial = []) {
-    const m = measureRhythm(beats, atrial);
+export function plausibility(beats = [], atrial = [], params = null) {
+    const m = measureRhythm(beats, atrial, params);
     const v = Object.fromEntries(MECHANISMS.map(x => [x.id, { status: 'ok', reasons: [] }]));
     const exclude = (ids, why) => ids.forEach(id => { v[id].status = 'excluded'; v[id].reasons.push(why); });
     const caution = (ids, why) => ids.forEach(id => { if (v[id].status !== 'excluded') v[id].status = 'caution'; v[id].reasons.push(why); });
@@ -221,8 +223,8 @@ export function rhythmSummary(m) {
  * A first reading for the marks — never one they exclude. Rate, width and the RP / PR decide it;
  * `rhythm.afib` (the viewer's automatic AF gate) wins.
  */
-export function suggestReading(beats = [], atrial = [], rhythm = {}) {
-    const { rhythm: m, verdicts } = plausibility(beats, atrial);
+export function suggestReading(beats = [], atrial = [], rhythm = {}, params = null) {
+    const { rhythm: m, verdicts } = plausibility(beats, atrial, params);
     const ok = (id) => verdicts[id] && verdicts[id].status !== 'excluded';
     const pick = (ids, reason) => { const id = ids.find(ok); return id ? { id, reason } : null; };
     const flutterLike = m.relation !== 'none' && m.nP >= 3 && m.ppCV != null && m.ppCV <= 0.1 && m.PP >= 160 && m.PP <= 350;
@@ -308,6 +310,8 @@ export function plausibleParams(mechanism, beats = [], atrial = []) {
         case 'avrtAnti':
             if (oneToOne) set('VA', m.RP, 'measured', measuredVA);
             else set('VA', cl ? Math.round(0.5 * cl) : 200, 'typical', 'antidromic AVRT: the return up the His–Purkinje system and the node is long');
+            // the pre-excited descent is what is left of the cycle once the return is accounted for
+            if (oneToOne && cl && m.RP != null) set('apAnteMs', Math.max(30, Math.round(cl - m.RP)), 'measured', 'atrial end of the pathway → delta wave, from your marks (cycle − RP)');
             break;
         case 'vt': {
             const e = oneToOne ? { VA: m.RP, n: m.coveredCycles } : null;
@@ -339,6 +343,13 @@ export function plausibleParams(mechanism, beats = [], atrial = []) {
     const maxPR = Math.max(0, ...B.filter(b => pairs.has(b.id)).map(b => b.qrsOnMs - aT.get(pairs.get(b.id))));
     if ((mechanism === 'avnodal' || mechanism === 'pvc' || mechanism === 'at') && maxPR > DEFAULT_PARAMS.PRmax - 50 && cl && maxPR < cl) {
         set('PRmax', Math.ceil((maxPR + 50) / 10) * 10, 'measured', `your longest PR is ${Math.round(maxPR)} ms`);
+    }
+    // A short PR (pre-excitation, a low atrial focus): narrow the window the other way, so the P that
+    // conducts is still read as the one that conducts.
+    const prs = B.filter(b => !ectopic(b) && pairs.has(b.id)).map(b => b.qrsOnMs - aT.get(pairs.get(b.id))).filter(x => x >= PR_FLOOR_MS);
+    const minPR = prs.length ? Math.min(...prs) : null;
+    if ((mechanism === 'avnodal' || mechanism === 'pvc' || mechanism === 'at') && minPR != null && minPR < DEFAULT_PARAMS.PRmin + 20) {
+        set('PRmin', Math.max(PR_FLOOR_MS, Math.floor((minPR - 20) / 10) * 10), 'measured', `your shortest PR is ${Math.round(minPR)} ms`);
     }
     return { params, source, why, rhythm: m };
 }
