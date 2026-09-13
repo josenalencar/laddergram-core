@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.15.0';
+export const ENGINE_VERSION = '1.16.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -358,7 +358,8 @@ function makeBuilder(mechanism, P, T) {
     const links = new Set();
     const ev = (tier, tMs, frac, o = {}) => {
         const e = { id: 'e' + (ne++), tier, tMs: r1(tMs), frac, style: o.style || 'dot', dir: o.dir || 'ante',
-                    role: o.role || '', beatId: o.beatId ?? null, atrialId: o.atrialId ?? null, source: o.source || 'derived' };
+                    role: o.role || '', beatId: o.beatId ?? null, atrialId: o.atrialId ?? null, source: o.source || 'derived',
+                    ...(o.timeHandle ? { timeHandle: o.timeHandle } : {}) };
         L.events.push(e);
         return e;
     };
@@ -368,7 +369,8 @@ function makeBuilder(mechanism, P, T) {
                     to: { tier: to[0], tMs: r1(to[1]), frac: to[2] },
                     style: o.style || 'solid', terminal: o.terminal || 'point', arrow: o.arrow || 'none',
                     curve: o.curve || 0, label: o.label || null, color: o.color || null, role: o.role || '',
-                    ...(o.labelAnchor ? { labelAnchor: o.labelAnchor } : {}) };
+                    ...(o.labelAnchor ? { labelAnchor: o.labelAnchor } : {}),
+                    ...(o.timeHandle ? { timeHandle: o.timeHandle } : {}) };
         L.paths.push(p);
         return p;
     };
@@ -421,8 +423,10 @@ function sinusEntry(B, a, { sn = true, focus = false } = {}) {
         return;
     }
     if (sn && T.hasSN) {
-        B.ev('SN', a.tMs - P.SACT, 0.5, { role: 'sn', atrialId: a.id });
-        B.seg(['SN', a.tMs - P.SACT, 0.5], ['A', a.tMs, 0], { atrialId: a.id, role: 'sa' });
+        // The sinus dot sits one sinoatrial conduction time before the P: dragging it is setting SACT.
+        const h = { at: 'from', param: 'SACT', atrialId: a.id };
+        B.ev('SN', a.tMs - P.SACT, 0.5, { role: 'sn', atrialId: a.id, timeHandle: h });
+        B.seg(['SN', a.tMs - P.SACT, 0.5], ['A', a.tMs, 0], { atrialId: a.id, role: 'sa', timeHandle: h });
     }
     B.ev('A', a.tMs, 0, { role: 'p', atrialId: a.id, source: a.source || 'auto' });
     B.seg(['A', a.tMs, 0], ['A', a.tMs, 1], { atrialId: a.id, role: 'atrium' });
@@ -489,7 +493,10 @@ function hisAndV(B, b, { from } = {}) {
     const J = junctionTimes(B, b.qrsOnMs, b.params);
     if (T.hasHis) {
         B.link(J.tHisIn, from, 1, 'His', 0, { beatId: b.id });
-        B.seg(['His', J.tHisIn, 0], ['His', J.tHb, 1], { beatId: b.id, role: 'his' });
+        // Where this segment starts IS the HV, measured back from the QRS onset: an editor can let a
+        // reader drag the dot instead of typing the number.
+        B.seg(['His', J.tHisIn, 0], ['His', J.tHb, 1],
+              { beatId: b.id, role: 'his', timeHandle: { at: 'from', param: 'HV', beatId: b.id } });
     }
     const src = T.hasHis ? 'His' : from;
     if (T.hasBB) branches(B, b, J, src);

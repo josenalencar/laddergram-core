@@ -1,6 +1,6 @@
 {
   "name": "laddergram-core",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "Plausibility engine and renderer for Lewis ladder diagrams (laddergrams): marks in, ladder out, one drawing. Shared by the ECG viewer's generator and the Lewis Ladder editor.",
   "type": "module",
   "private": true,
@@ -28,6 +28,6 @@
     "PREMISES.md"
   ],
   "scripts": {
-    "test": "node test/golden.test.mjs && node test/detect.test.mjs && node test/rhythm.test.mjs && node test/perbeat.test.mjs"
+    "test": "node test/golden.test.mjs && node test/detect.test.mjs && node test/rhythm.test.mjs && node test/perbeat.test.mjs && node test/handles.test.mjs"
   }
 }

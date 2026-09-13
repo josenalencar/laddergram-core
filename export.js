@@ -265,11 +265,13 @@ export function layoutLadder(ladder, o) {
         if (found) {
             if (meta.asterisk) found.pointStyle = 'asterisk';
             if (meta.measured) found.inferred = false;
+            if (meta.timeHandle && !found.timeHandle) found.timeHandle = meta.timeHandle;
             if (meta.fromEvent && !found.fromEvent) { found.key = meta.key; found.role = meta.role; found.fromEvent = true; }
             return found.id;
         }
         const pt = { id: pid(points.length), x, y, lineId: lineIdOfLevel(lv), type: 'point',
                      ...(meta.asterisk ? { pointStyle: 'asterisk' } : {}), origin: 'engine',
+                     ...(meta.timeHandle ? { timeHandle: meta.timeHandle } : {}),
                      key: meta.key, role: meta.role, inferred: !meta.measured, fromEvent: !!meta.fromEvent };
         points.push(pt);
         byXY.set(k, pt);
@@ -280,13 +282,16 @@ export function layoutLadder(ladder, o) {
     // Events first, so a point that is also an event carries the event's key and role (handles use them).
     for (const e of ladder.events) {
         if (e.style === 'none' || !inWindow(e.tMs)) continue;
-        pointAt(e.tMs, level(e), { asterisk: e.style === 'asterisk', measured: measured(e), key: e.key, role: e.role, fromEvent: true });
+        pointAt(e.tMs, level(e), { asterisk: e.style === 'asterisk', measured: measured(e), key: e.key, role: e.role, fromEvent: true,
+                                   timeHandle: e.timeHandle });
     }
     for (const p of ladder.paths) {
         const c = clipPath(p, tMinMs, tMaxMs, level);
         if (!c) continue;
-        const startPoint = pointAt(c.a.t, c.a.g, { key: p.key && `${p.key}:a`, role: p.role });
-        const endPoint = pointAt(c.b.t, c.b.g, { key: p.key && `${p.key}:b`, role: p.role });
+        // A handle belongs to one end of the path, and only when that end was not clipped away.
+        const hAt = (end) => (p.timeHandle && p.timeHandle.at === end && !c.clipped ? p.timeHandle : undefined);
+        const startPoint = pointAt(c.a.t, c.a.g, { key: p.key && `${p.key}:a`, role: p.role, timeHandle: hAt('from') });
+        const endPoint = pointAt(c.b.t, c.b.g, { key: p.key && `${p.key}:b`, role: p.role, timeHandle: hAt('to') });
         if (startPoint === endPoint) continue;
         const pass = p.style === 'pass';
         const conn = { id: cid(connections.length), startPoint, endPoint, style: pass ? 'dashed' : (p.style || 'solid'),
