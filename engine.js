@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.10.0';
+export const ENGINE_VERSION = '1.11.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -244,16 +244,24 @@ export function pairAtrialToBeats(beats, atrial, params, { minLeadMs } = {}) {
     const aById = new Map(A.map(a => [a.id, a]));
 
     // What the reader has said outright is never re-decided: a beat told which P conducted it keeps that P,
-    // and a P called blocked is not available to conduct anything.
+    // a beat that says none conducted it is never given one, and a P called blocked conducts nothing.
     const forced = new Map();
-    for (const b of B) if (b.pairedAtrialId && aById.has(b.pairedAtrialId)) forced.set(b.id, b.pairedAtrialId);
-    const spoken = new Set([...forced.values(), ...A.filter(a => a.blockedAt).map(a => a.id)]);
+    for (const b of B) if (!b.noConductedP && b.pairedAtrialId && aById.has(b.pairedAtrialId)) forced.set(b.id, b.pairedAtrialId);
+    const alone = new Set(B.filter(b => b.noConductedP).map(b => b.id));
+    // A P named as the one a beat went back up to was activated from below, so it is not available to
+    // have conducted anything from above. Reserving it here is what makes that answer mean something.
+    const spoken = new Set([
+        ...forced.values(),
+        ...A.filter(a => a.blockedAt).map(a => a.id),
+        ...B.map(b => b.retroAtrialId).filter(id => id && aById.has(id)),
+    ]);
 
     const run = (lo, hi) => {
         const claimed = new Set(spoken);
         const pairs = new Map(forced);
         const unpairedV = [];
         for (const b of B) {
+            if (alone.has(b.id)) { unpairedV.push(b); continue; }
             if (pairs.has(b.id)) continue;
             let best = null;
             for (const a of A) {

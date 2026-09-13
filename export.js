@@ -35,6 +35,7 @@ export const FORMAT_VERSION = 2;
 const beatOut = (b) => ({ id: b.id, qrsOnMs: b.qrsOnMs, qrsOffMs: b.qrsOffMs, rPeakMs: b.rPeakMs ?? null,
                           quality: b.quality || 'normal', qrsWidthMs: b.qrsWidthMs ?? null, source: b.source || 'auto',
                           conduction: b.conduction ?? null,
+                          ...(b.noConductedP ? { noConductedP: true } : {}),
                           ...(b.pairedAtrialId ? { pairedAtrialId: String(b.pairedAtrialId) } : {}),
                           ...(b.retroAtrialId ? { retroAtrialId: String(b.retroAtrialId) } : {}) });
 const atrialOut = (a) => ({ id: a.id, tMs: a.tMs, source: a.source || 'auto',
