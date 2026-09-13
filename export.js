@@ -36,6 +36,7 @@ const beatOut = (b) => ({ id: b.id, qrsOnMs: b.qrsOnMs, qrsOffMs: b.qrsOffMs, rP
                           quality: b.quality || 'normal', qrsWidthMs: b.qrsWidthMs ?? null, source: b.source || 'auto',
                           conduction: b.conduction ?? null,
                           ...(b.noConductedP ? { noConductedP: true } : {}),
+                          ...(b.params && Object.keys(b.params).length ? { params: { ...b.params } } : {}),
                           ...(b.pairedAtrialId ? { pairedAtrialId: String(b.pairedAtrialId) } : {}),
                           ...(b.retroAtrialId ? { retroAtrialId: String(b.retroAtrialId) } : {}) });
 const atrialOut = (a) => ({ id: a.id, tMs: a.tMs, source: a.source || 'auto',

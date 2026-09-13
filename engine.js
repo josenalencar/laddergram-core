@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.11.0';
+export const ENGINE_VERSION = '1.12.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -393,8 +393,14 @@ function makeBuilder(mechanism, P, T) {
 }
 
 /** When the wave leaves each junctional level, for a QRS at qrsOn. */
-function junctionTimes(B, qrsOn) {
-    const { P, T } = B;
+/**
+ * Where a beat crosses the junction. A beat may carry timings of its own — an ectopic beat does not
+ * conduct through the His–Purkinje system the way the sinus beats around it do — and those win for that
+ * beat alone, leaving the rest of the ladder on the ladder's own values.
+ */
+function junctionTimes(B, qrsOn, own = null) {
+    const T = B.T;
+    const P = own ? { ...B.P, ...own } : B.P;
     const tHisIn = qrsOn - P.HV;
     const tHb = T.hasBB ? qrsOn - (1 - JUNCTION.hisShare) * P.HV : qrsOn;
     const tLb = T.hasFasc ? tHb + JUNCTION.lbbShare * (qrsOn - tHb) : qrsOn;
@@ -478,7 +484,7 @@ function branches(B, b, J, src) {
 function hisAndV(B, b, { from } = {}) {
     const { T } = B;
     from = from || T.av;
-    const J = junctionTimes(B, b.qrsOnMs);
+    const J = junctionTimes(B, b.qrsOnMs, b.params);
     if (T.hasHis) {
         B.link(J.tHisIn, from, 1, 'His', 0, { beatId: b.id });
         B.seg(['His', J.tHisIn, 0], ['His', J.tHb, 1], { beatId: b.id, role: 'his' });
@@ -511,7 +517,7 @@ function atrialRetro(B, tA, o = {}) {
 function junctionalFocus(B, b, retroTo, { retro = true } = {}) {
     const { P, T } = B;
     const tF = b.qrsOnMs - P.HV;
-    const J = junctionTimes(B, b.qrsOnMs);
+    const J = junctionTimes(B, b.qrsOnMs, b.params);
     if (T.hasHis) {
         B.ev('His', tF, 0, { style: 'asterisk', role: 'focus-junctional', beatId: b.id });
         hisAndV(B, b, { from: T.avLow });
@@ -634,7 +640,7 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
     if (P.ectopicVA != null) {
         for (const b of beats) {
             if (pairs.has(b.id) || retroOf.has(b.id)) continue;
-            const want = b.qrsOnMs + P.ectopicVA;
+            const want = b.qrsOnMs + (b.params?.ectopicVA ?? P.ectopicVA);
             const hit = atrial.find(a => !beatOfA.has(a.id) && !claimedRetro.has(a.id) && Math.abs(a.tMs - want) <= DEDUP_MS);
             if (hit) { claimedRetro.add(hit.id); retroOf.set(b.id, hit); }
             else retroOf.set(b.id, { tMs: want });
@@ -679,7 +685,7 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
         } else if (beatOfA.has(a.id)) {
             const b = bById.get(beatOfA.get(a.id));
             const AH = ahOf.get(a.id);
-            const J = junctionTimes(B, b.qrsOnMs);
+            const J = junctionTimes(B, b.qrsOnMs, b.params);
             // Bow only inside a Wenckebach run: a curve says "decremental", and
             // beat-to-beat PR jitter in sinus rhythm is not that.
             const curve = pattern.wenckeRun.has(a.id) && AH - AHbase >= 20 ? r1((AH - AHbase) * 0.15) : 0;
@@ -903,7 +909,7 @@ function buildAvnrt(B, input) {
     if (!beats.length) return;
     const { med: rr } = rrStats(beats);
     const tops = beats.map(b => b.qrsOnMs + VA);              // retro P onsets
-    const lows = beats.map(b => junctionTimes(B, b.qrsOnMs).tAvOut);
+    const lows = beats.map(b => junctionTimes(B, b.qrsOnMs, b.params).tAvOut);
     const antegrade = beats.map((b, i) => lows[i] - (i > 0 ? tops[i - 1] : NaN));
     const medAnte = median(antegrade.filter(Number.isFinite)) ?? (rr ? rr - VA - P.HV : 250);
 
@@ -963,7 +969,7 @@ function buildAvrt(B, input, { pjrt = false } = {}) {
     const VA = P.VA;
     const { med: rr } = rrStats(beats);
     const tA = beats.map(b => b.qrsOnMs + Math.max(VA, P.apVdelay + 10));
-    const lows = beats.map(b => junctionTimes(B, b.qrsOnMs).tAvOut);
+    const lows = beats.map(b => junctionTimes(B, b.qrsOnMs, b.params).tAvOut);
     const ah = beats.map((b, i) => i > 0 ? lows[i] - (tA[i - 1] + P.apToAV) : NaN);
     const medAH = median(ah.filter(Number.isFinite)) ?? 150;
     const longRP = pjrt || (rr && VA > rr / 2);
@@ -1002,7 +1008,7 @@ function buildAfib(B, input) {
     let last = -1;
     for (const b of beats) {
         if (isEctopicLike(b, P)) continue;
-        const J = junctionTimes(B, b.qrsOnMs);
+        const J = junctionTimes(B, b.qrsOnMs, b.params);
         const latest = J.tAvOut - P.AHmin - P.PA;
         let k = -1;
         for (let i = f.length - 1; i > last; i--) if (f[i] <= latest) { k = i; break; }
@@ -1015,7 +1021,7 @@ function buildAfib(B, input) {
         B.seg(['A', t, 0], ['A', t, 1], { role: 'atrium' });
         if (used.has(i)) {
             const b = used.get(i);
-            avConduct(B, t, junctionTimes(B, b.qrsOnMs).tAvOut, { beatId: b.id });
+            avConduct(B, t, junctionTimes(B, b.qrsOnMs, b.params).tAvOut, { beatId: b.id });
         } else {
             B.seg([B.T.av, t, 0], [B.T.av, t + 30, 0.15 + 0.45 * rnd()],
                   { style: 'dashed', terminal: 'block', role: 'av-concealed' });
@@ -1072,7 +1078,7 @@ function buildFlutter(B, input) {
         B.seg(['A', f.tMs, 0], ['A', f.tMs, 1], { atrialId: f.id, role: 'atrium' });
         if (beatOfF.has(f.id)) {
             const b = bById.get(beatOfF.get(f.id));
-            avConduct(B, f.tMs, junctionTimes(B, b.qrsOnMs).tAvOut, { atrialId: f.id, beatId: b.id });
+            avConduct(B, f.tMs, junctionTimes(B, b.qrsOnMs, b.params).tAvOut, { atrialId: f.id, beatId: b.id });
         } else avBlock(B, f.tMs, 0.3, { atrialId: f.id });
     }
     for (const b of beats) {
@@ -1101,7 +1107,7 @@ function buildJt(B, input) {
     const { P, T } = B;
     const beats = input.beats.slice().sort(byQ);
     for (const b of beats) {
-        const J = junctionTimes(B, b.qrsOnMs);
+        const J = junctionTimes(B, b.qrsOnMs, b.params);
         const tOut = J.tAvOut, tF = tOut - P.jtNodeMs;
         const tier = T.avLow;
         // NH region / lower third of the nodal tier (Fable review; Issa, Miller & Zipes)
@@ -1181,7 +1187,7 @@ function buildHisExtra(B, input) {
         const tIn = a.tMs;
         if (beatOfA.has(a.id)) {
             const b = bById.get(beatOfA.get(a.id));
-            avConduct(B, tIn, junctionTimes(B, b.qrsOnMs).tAvOut, { atrialId: a.id, beatId: b.id });
+            avConduct(B, tIn, junctionTimes(B, b.qrsOnMs, b.params).tAvOut, { atrialId: a.id, beatId: b.id });
             continue;
         }
         const tH = tIn + P.PA - P.hPrimeLead;       // H′ fires hPrimeLead before the P reaches the node
