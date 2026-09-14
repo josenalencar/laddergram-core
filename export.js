@@ -20,6 +20,7 @@
  */
 import { TIER_CATALOG, CONDUCTIONS, normalizeTiers, ENGINE_NAME, ENGINE_VERSION } from './engine.js';
 import { makeLayout, capLines } from './render.js';
+import { cleanEp } from './egm.js';
 
 // GROUP_GAP: lewis-ladder adds this much room before every ladder after the first
 // (src/lib/ladders.ts lineOffsets) — the two must match or points miss their lines.
@@ -44,7 +45,7 @@ const atrialOut = (a) => ({ id: a.id, tMs: a.tMs, source: a.source || 'auto',
 
 export function toLaddergramJson({ filename = null, lead = null, fs = null, durationMs = null, speed = null,
                                    beats, atrial, mechanism, params, tiers = null, ladder, layers = [], title = '', caption = '', style = 'bands', brackets = null,
-                                   styleOverrides = null, hiddenKeys = null }) {
+                                   styleOverrides = null, hiddenKeys = null, ep = null }) {
     return {
         format: FORMAT, version: FORMAT_VERSION, createdAt: new Date().toISOString(),
         source: { filename, lead, fs, durationMs },
@@ -53,6 +54,8 @@ export function toLaddergramJson({ filename = null, lead = null, fs = null, dura
         ...(cleanBrackets(brackets) ? { brackets: cleanBrackets(brackets) } : {}),
         ...(cleanRestyle(styleOverrides) ? { styleOverrides: cleanRestyle(styleOverrides) } : {}),
         ...(cleanHidden(hiddenKeys) ? { hiddenKeys: cleanHidden(hiddenKeys) } : {}),
+        // the EP view the reading was shown in (catheters, block order, sweep speed): it travels with the file
+        ...(cleanEp(ep) ? { ep: cleanEp(ep) } : {}),
         beats: beats.map(beatOut),
         atrial: atrial.map(atrialOut),
         ladder: { tiers: ladder.tiers, events: ladder.events, paths: ladder.paths, intervals: ladder.intervals, notes: ladder.notes },
@@ -111,7 +114,8 @@ export function fromLaddergramJson(obj) {
              params: obj.params || {}, tiers: normalizeTiers(obj.tiers), layers, source: obj.source || {},
              title: String(obj.title || ''), caption: String(obj.caption || ''), style: cleanStyle(obj.style) || 'bands',
              brackets: cleanBrackets(obj.brackets),
-             styleOverrides: cleanRestyle(obj.styleOverrides) || {}, hiddenKeys: cleanHidden(obj.hiddenKeys) || [] };
+             styleOverrides: cleanRestyle(obj.styleOverrides) || {}, hiddenKeys: cleanHidden(obj.hiddenKeys) || [],
+             ep: cleanEp(obj.ep) };
 }
 
 /** Clip a path to [tMin, tMax] on the time axis; null if nothing is left. `level` maps a point to its continuous height. */
@@ -350,7 +354,7 @@ export function layoutLadder(ladder, o) {
  * @param opts.provenance           { kind, source, licence, deidentified, lead, speedMmS, gainMmMv, note }
  */
 export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands', backgroundImage = null, imageWidthPx = 0, imageHeightPx = 0,
-                                               timeWidthPx = imageWidthPx, marks = null, provenance = null } = {}) {
+                                               timeWidthPx = imageWidthPx, marks = null, provenance = null, ep = null } = {}) {
     if (!(tMaxMs > tMinMs)) throw new Error('empty time range');
     const list0 = Array.isArray(ladders) ? ladders : [{ ladder: ladders }];
     // each ladder may carry its own style (a teaching figure can show both); `style` is the default
@@ -440,5 +444,6 @@ export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands',
         });
     }
     if (provenance) out.provenance = provenance;
+    if (cleanEp(ep)) out.ep = cleanEp(ep);
     return out;
 }

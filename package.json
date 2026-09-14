@@ -1,6 +1,6 @@
 {
   "name": "laddergram-core",
-  "version": "1.18.0",
+  "version": "1.20.0",
   "description": "Plausibility engine and renderer for Lewis ladder diagrams (laddergrams): marks in, ladder out, one drawing. Shared by the ECG viewer's generator and the Lewis Ladder editor.",
   "type": "module",
   "private": true,
@@ -13,7 +13,10 @@
     "./detect": "./detect.js",
     "./rhythm": "./rhythm.js",
     "./render": "./render.js",
-    "./stack": "./stack.js"
+    "./stack": "./stack.js",
+    "./egm": "./egm.js",
+    "./epsim": "./epsim.js",
+    "./eplive": "./eplive.js"
   },
   "files": [
     "engine.js",
@@ -24,10 +27,13 @@
     "figures.js",
     "render.js",
     "stack.js",
+    "egm.js",
+    "epsim.js",
+    "eplive.js",
     "README.md",
     "PREMISES.md"
   ],
   "scripts": {
-    "test": "node test/golden.test.mjs && node test/detect.test.mjs && node test/rhythm.test.mjs && node test/perbeat.test.mjs && node test/handles.test.mjs"
+    "test": "node test/golden.test.mjs && node test/detect.test.mjs && node test/rhythm.test.mjs && node test/perbeat.test.mjs && node test/handles.test.mjs && node test/render-golden.test.mjs && node test/layout.test.mjs && node test/egm.test.mjs && node test/epsim.test.mjs"
   }
 }

@@ -50,16 +50,18 @@ export function composeStack(items, { style = 'bands', durationMs } = {}) {
  * The layout a composed stack needs: its tier sets, whether a title row is shown, caption and bracket rows.
  * `makeLayout` is the renderer's (render.js); it is passed in so this module depends on no renderer.
  */
-export function layoutForStack(stack, { makeLayout, style = 'bands', stripH, gap, groupGap, footer }) {
+export function layoutForStack(stack, { makeLayout, style = 'bands', stripH, gap, groupGap, footer, order = null, egm = null }) {
     const groups = stack.map(l => l.tiers);
     const titles = stack.some(l => l.letter || l.shownTitle);
     const captionLines = stack.map(l => capLines(l.caption));
     const styles = stack.map(l => l.style);
     const bracketRows = stack.map(l => !!l.bracketList?.some(b => b.row !== 'strip'));
-    const key = JSON.stringify([groups, titles, captionLines, styles, bracketRows, stripH, footer]);
+    // `order` and `egm`: the blocks of an EP frame and its intracardiac rows (render.js makeLayout)
+    const key = JSON.stringify([groups, titles, captionLines, styles, bracketRows, stripH, footer, order, egm]);
     const layout = makeLayout({ groups, titles, captionLines, style, styles, bracketRows,
                                 ...(stripH != null ? { stripH } : {}), ...(gap != null ? { gap } : {}),
-                                ...(groupGap != null ? { groupGap } : {}), ...(footer != null ? { footer } : {}) });
+                                ...(groupGap != null ? { groupGap } : {}), ...(footer != null ? { footer } : {}),
+                                ...(order ? { order } : {}), ...(egm ? { egm } : {}) });
     return { key, layout };
 }
 

@@ -153,3 +153,105 @@ submission): every one of them was an error the previous rule produced.
 - A tracing in which every other P conducts with the same PR is a 2:1 block, never "apparent complete block"
   (`twoToOneNarrow`, narrow QRS; the review's Figure 6 uses `twoToOneIvcd`, QRS 110 ms — mildly prolonged,
   below the 120-ms bundle-branch-block threshold, so the nodal and infranodal readings both stay open).
+
+## 7. Intracardiac channels (EP view)
+
+- **Every deflection is a ladder event plus a fixed anatomical offset** (`egm.js`). The ladder already says when
+  the atrium, the His and the ventricle are activated on every beat and from where; a catheter records that
+  activation where it lies, a fixed time later. No other physiology is added, so the EP view can only say what
+  the reading says — plausible, not measured, like the intracardiac brackets (§5).
+- The His catheter records His activation whether or not the ladder draws a His tier: the schedule is built on
+  the reading with the His tier added, and never changes with the tiers drawn.
+- Catheters: HRA; His (one bipole, or its proximal and distal pairs — the distal pair 4 ms later, with more His
+  and ventricle and less atrium); the coronary sinus decapolar as five bipoles, **CS 9-10 at the ostium to
+  CS 1-2 distally**; the RV apex. They are listed in that order, as an EP system lists them.
+- Atrial activation, ms after the ladder's atrial line (HisA = the atrial deflection on the His catheter; PA is
+  the reading's own):
+
+  | origin | HRA | HisA | CS 9-10 | 7-8 | 5-6 | 3-4 | CS 1-2 |
+  |---|---|---|---|---|---|---|---|
+  | sinus P, atrial focus, HRA pacing | 0 | PA | PA+10 | PA+20 | PA+30 | PA+40 | PA+50 |
+  | retrograde over the fast pathway (concentric) | 35 | 0 | 10 | 20 | 30 | 40 | 50 |
+  | retrograde over the slow pathway | 45 | 15 | 0 | 10 | 20 | 30 | 40 |
+  | accessory pathway, left lateral (eccentric) | 70 | 50 | 40 | 30 | 20 | 10 | 0 |
+  | accessory pathway, posteroseptal | 35 | 5 | 0 | 10 | 20 | 30 | 40 |
+  | accessory pathway, right free wall | 0 | 25 | 35 | 45 | 55 | 65 | 75 |
+  | typical flutter (up the septum) | 100 | 10 | 0 | 10 | 20 | 30 | 40 |
+
+  A retrograde P goes up the pathway the ladder draws it up: an `ap` line is the pathway (its site is a
+  setting — PJRT defaults to posteroseptal, every other reading to left lateral), an `av-retro` line drawn slow
+  (wavy, `slow`, or in the AV slow tier) is the slow pathway, any other the fast one.
+- Ventricular activation, ms after the QRS onset (HisV = the ventricular deflection on the His catheter; the
+  coronary sinus records the left ventricle far-field, small and blunt; the HRA a trace of it at +35):
+
+  | origin | HisV | RVa | CS 9-10 | 7-8 | 5-6 | 3-4 | CS 1-2 |
+  |---|---|---|---|---|---|---|---|
+  | conducted | 15 | 25 | 45 | 52 | 58 | 64 | 70 |
+  | RBBB | 15 | 70 | 45 | 52 | 58 | 64 | 70 |
+  | LBBB | 20 | 25 | 85 | 95 | 105 | 115 | 125 |
+  | RV focus (PVC, VT, escape) | 40 | 0 | 70 | 80 | 90 | 100 | 110 |
+  | LV lateral focus | 50 | 65 | 32 | 24 | 16 | 8 | 0 |
+  | pre-excited, left lateral pathway | 45 | 55 | 40 | 30 | 20 | 10 | 0 |
+  | pre-excited, posteroseptal pathway | 0 | 20 | 10 | 20 | 30 | 40 | 50 |
+  | pre-excited, right free-wall pathway | 30 | 15 | 60 | 70 | 80 | 90 | 100 |
+
+  A fusion beat is drawn conducted; where a ventricular focus arises (RV or LV) is a setting.
+- The His deflection is where the ladder's His is: the anterograde His, the retrograde His of a ventricular beat
+  or of antidromic AVRT (VH), the His a Mobitz II or infra-His block reaches before it stops, and H′ of a
+  concealed His extrasystole. A blocked P writes an A and nothing below it.
+- Fibrillation: every catheter catches each schematic f wave at its own moment and size; no activation sequence
+  and no A letters, because there is none to read.
+- **The static figure is black and white, like the ladder**: one trace per channel in ink, a faint time line
+  every 100 ms, the letters A · H · V over the His deflections, and AH and HV as dimension lines on one beat
+  under the His channel. The waveforms are drawn, not simulated (a sharp near-field complex, a blunt far-field
+  one), seeded so the same reading gives the same figure.
+- **The reader orders the blocks** — surface tracing, intracardiac channels, ladder — in any of the six orders,
+  so a figure is printed the way it will be read. Marker guides run from the tracing to the ladder only where
+  nothing lies between them. The EP sweep speeds are 100, 200 and 300 mm/s (200 is a standard speed for this).
+- **Where the accessory pathway is, the reader says.** A left lateral pathway activates the coronary sinus
+  distal to proximal (eccentric); a posteroseptal one reaches CS 9-10 and the His first, near-concentric — the
+  sequence of the node, which the EP view must not fake; a right free-wall one reaches the HRA before the whole
+  coronary sinus. The surface tracing rarely settles it, so whenever the reading has a pathway (orthodromic or
+  antidromic AVRT, PJRT) the EP settings ask for its site, PJRT proposing posteroseptal and the others left
+  lateral.
+
+### 7b. The live heart (`epsim.js`) and the recorder (`eplive.js`)
+
+- **The live view is a network, not a replay.** After Iravanian's network simulator (svtsim.com; CinC 2021),
+  written from its description: nodes (sinus node, atrium, His, ventricle, a focus) activate and stay refractory;
+  links conduct with a delay that depends on how long they have recovered **since their last conduction
+  ended** — `min + span·e^(−(DI − ERP)/τ)`, blocked under ERP. Decremental conduction, Wenckebach, jumps,
+  echoes and re-entry follow from those numbers; none is a rule.
+- **It starts as the static figure.** `fromReading` fits every path to the reading — PP, PR, AH, HV, VA, CL, the
+  circuit or the focus — and seeds the state one cycle before the first beat, so the first seconds of the live
+  heart are the static figure activation for activation (within half a millisecond, tested on sinus, first-degree
+  block, Wenckebach — the curve is fitted through its periods — 2:1 in the node and below the His, Mobitz II,
+  typical and atypical AVNRT, orthodromic and antidromic AVRT, PJRT, junctional and atrial tachycardia, complete
+  block with either escape, flutter 2:1 and 4:1, ventricular bigeminy and concealed His extrasystoles).
+- What the network cannot derive it takes from the reading, and says so: a Mobitz II ratio (no recovery time
+  explains it) is a repeating conduct/block pattern; the captures of VT with AV dissociation are left to the
+  network, not scripted.
+- **Concealed conduction is modelled where a reading depends on it**: a PVC or a VT beat that does not reach the
+  atrium still leaves the node refractory (the compensatory pause, the blocked P waves); an H′ blocks the next P;
+  a concealed accessory pathway is entered by every atrial wave, so sinus rhythm does not echo and an atrial
+  extrastimulus that lengthens the AV delay is what induces AVRT.
+- **Answers the textbooks give, checked** (`epsim.test.mjs`): AV nodal decrement and ERP; 1:1 then Wenckebach
+  under atrial pacing; no conduction in complete block; concentric retrograde conduction under RV pacing; AVNRT —
+  an AH jump of ≥ 50 ms, induction by S2 in the slow-pathway window only, a V-A-V response after entrainment,
+  termination by a shock; AVRT — induction by an atrial S2, eccentric (or septal, or right-sided) retrograde
+  activation under RV pacing. **A shock** stops what is re-entrant in the heart (AVNRT, AVRT, flutter,
+  fibrillation, VT — a driver in this model, silenced for good) and not an automatic focus (atrial or junctional
+  tachycardia), which fires again after its cycle; the sinus node takes over after its own.
+- The stimulator: HRA or RV apex, S1 × n then S2, S3, S4 (each from the stimulus before it), sensing the next beat
+  at that site before the first stimulus, or continuous at S1 until stopped. Deterministic: the same reading,
+  seed and actions give the same heart (fibrillation draws its cycles from the seed).
+- A teaching model, not a patient: one atrium, one His, one ventricle; no ablation, no drugs, no atrial or
+  ventricular fibrillation induced by pacing.
+- **The recorder is in colour on black, as a lab screen**: surface II (white) and V1 (green) written from the
+  same activations — P, QRS and T shaped by where each came from (a retrograde P inverted in II, an RV beat wide
+  and negative in V1, a pre-excited one slurred) — then the catheters (HRA yellow, His orange, the coronary sinus
+  from light to deep blue proximal to distal, RV apex pink) and the stimulus channel. The pen sweeps left to
+  right at 100, 200 or 300 mm/s, erasing a narrow band ahead of it and wrapping at the edge, with a tick every
+  100 ms and a taller one every second. Every deflection comes from `activationDeflections`, the static figure's
+  own mapping.
+

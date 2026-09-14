@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { FIGURES, figurePanels } from '../figures.js';
 import { composeStack, layoutForStack, frameGroups } from '../stack.js';
+import { egmSchedule, egmSamples, egmLayoutOptions, DEFAULT_EP } from '../egm.js';
 import { makeRecorder } from './mockCanvas.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -48,11 +49,47 @@ function fingerprint(fig) {
     return { hash: createHash('sha256').update(JSON.stringify(log)).digest('hex'), calls: log.length, log, onRule };
 }
 
+/**
+ * Two EP frames (PREMISES.md §7): the reference normal ladder with every catheter, the tracing on top, at
+ * 100 mm/s; and a short-RP tachycardia read as AVNRT with the intracardiac channels first, the His split and
+ * the AH / HV shown, at 200 mm/s.
+ */
+const EP_GOLDENS = [
+    { id: 'ep-sinus', fig: 'fig0', panel: 0, speedMmS: 100, ep: DEFAULT_EP },
+    { id: 'ep-avnrt', fig: 'fig1', panel: 0, speedMmS: 200, ep: { ...DEFAULT_EP, order: ['egm', 'strip', 'ladder'], hisSplit: true, showAhHv: true } },
+];
+function fingerprintEp(spec) {
+    const fig = FIGURES.find(f => f.id === spec.fig);
+    const { rec, panels } = figurePanels(fig);
+    const panel = { ...panels[spec.panel], style: 'bands' };
+    const lead = rec.rhythmLead || 'II';
+    const sig = rec.leads[lead];
+    const fs = rec.sampleRate;
+    const durationMs = sig.length * 1000 / fs;
+    const stack = composeStack([panel], { style: 'bands', durationMs });
+    const { layout } = layoutForStack(stack, { makeLayout: R.makeLayout, style: 'bands', order: spec.ep.order, egm: egmLayoutOptions(spec.ep) });
+    const schedule = egmSchedule({ beats: panel.beats, atrial: panel.atrial, mechanism: panel.mechanism, params: panel.params, tiers: panel.tiers, durationMs }, spec.ep);
+    const samples = egmSamples(schedule, { durationMs });
+    const view = R.makeView({ speedMmS: spec.speedMmS, t0Ms: 0, gainMmMv: 5 });
+    const cssW = Math.ceil(view.labelW + Math.min(durationMs, 2400) * view.pxPerMs) + 8;
+    const ctx = makeRecorder();
+    R.drawFrame(ctx, {
+        view, layout, cssW,
+        strip: { sig, fs, gaps: null, label: lead },
+        beats: panel.beats, atrial: panel.atrial,
+        ...frameGroups(stack),
+        egm: { schedule, samples, showLetters: spec.ep.showLetters, showAhHv: spec.ep.showAhHv },
+        selected: null, showIntervals: false, markerLines: false, footerText: null, bare: true,
+    });
+    const log = ctx.__log;
+    return { hash: createHash('sha256').update(JSON.stringify(log)).digest('hex'), calls: log.length, log, onRule: [] };
+}
+
 let pass = 0, fail = 0;
 const stored = existsSync(FIX) ? JSON.parse(readFileSync(FIX, 'utf8')) : {};
 const next = {};
-for (const fig of FIGURES) {
-    const { hash, calls, log, onRule } = fingerprint(fig);
+for (const fig of [...FIGURES, ...EP_GOLDENS]) {
+    const { hash, calls, log, onRule } = fig.ep ? fingerprintEp(fig) : fingerprint(fig);
     if (onRule.length) { fail++; console.error(`  FAIL     ${fig.id}: label on a tier line — ${onRule.join(', ')}`); }
     else pass++;
     next[fig.id] = { hash, calls };
@@ -72,5 +109,8 @@ for (const fig of FIGURES) {
     }
 }
 if (update || Object.keys(stored).length === 0) writeFileSync(FIX, JSON.stringify(next, null, 0) + '\n');
+// A golden no fixture holds yet has nothing to be compared with: say so, so it is recorded on purpose.
+const unrecorded = Object.keys(next).filter(k => !stored[k]);
+if (!update && unrecorded.length) { console.error(`  not recorded yet: ${unrecorded.join(', ')} — run with --update`); fail++; }
 console.log(`\n${pass} ok, ${fail} fail${update ? ' (goldens refreshed)' : ''}`);
 if (fail) process.exit(1);

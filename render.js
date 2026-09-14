@@ -30,7 +30,7 @@ export const LABEL_W = 60;
  * gain must then be standard values once scaled (STANDARD_SPEEDS, STANDARD_GAINS).
  */
 export const PRINT = { scale: null };
-export const STANDARD_SPEEDS = [12.5, 25, 50, 75, 100, 150, 300];      // mm/s
+export const STANDARD_SPEEDS = [12.5, 25, 50, 75, 100, 150, 200, 300]; // mm/s (200: the intracardiac sweep)
 export const STANDARD_GAINS = [5, 10, 15, 20];                         // mm/mV (½, 1, 1½, 2 × standard)
 export const printDpi = (scale) => 25.4 * PX_PER_MM * 3 / scale;       // dpi of the 3× PNG at that print scale
 const fmtNum = (v) => String(Math.round(v * 100) / 100);
@@ -56,6 +56,8 @@ export const COLORS = Object.freeze({
     PASS: '#64748b',           // "traversed, no delay attributed here"
     RULE: '#94a3b8',           // the rule between the label column and the drawing
     HOLLOW: '#fff',            // the inside of a measured dot
+    EGM_TIMELINE: '#e8ecf2',   // intracardiac channels: a time line every 100 ms
+    EGM_TIMELINE_BOLD: '#cbd5e1',  // … and every second
 });
 const INK = COLORS.INK, MUTED = COLORS.MUTED, COL_P = COLORS.P, COL_Q = COLORS.Q, COL_SEL = COLORS.SEL, BRACKET_COL = COLORS.BRACKET;
 const GRID_FINE = COLORS.GRID_FINE, GRID_BOLD = COLORS.GRID_BOLD;
@@ -74,6 +76,7 @@ export const FONTS = Object.freeze({
     tag: `10px ${FONT_FAMILY}`,
     tagPrint: `600 10px ${FONT_FAMILY}`,
     interval: `10px ${FONT_FAMILY}`,
+    egmLetter: `700 11px ${FONT_FAMILY}`,
 });
 
 // ─── layout ───────────────────────────────────────────────────────────────────
@@ -110,13 +113,73 @@ export const TITLE_BASELINE = 18;
 /** How many 15 px rows a caption takes: one per 140 characters, at most three. */
 export const capLines = (c) => (c ? Math.min(3, Math.ceil(String(c).length / 140)) : 0);
 
+/**
+ * The intracardiac block (PREMISES.md §7): one row per channel, a row above the first His channel for the
+ * letters A · H · V, and — when the AH and HV are shown — a bracket row right under the last His channel,
+ * so the dimension lines sit next to the deflections they measure.
+ */
+export const EGM_ROW_H = 34;
+export const EGM_LETTER_H = 14;
+/** Pixels per unit of electrogram amplitude (a near-field deflection peaks at 1). */
+export const EGM_GAIN_PX = 13;
+/** What each channel is called in the label column. */
+export const EGM_CHANNEL_LABELS = Object.freeze({
+    HRA: 'HRA', His: 'His', Hisp: 'His p', Hisd: 'His d',
+    CS910: 'CS 9-10', CS78: 'CS 7-8', CS56: 'CS 5-6', CS34: 'CS 3-4', CS12: 'CS 1-2',
+    RVa: 'RVa', Stim: 'Stim', II: 'II', V1: 'V1',
+});
+const HIS_CHANNELS = ['His', 'Hisp', 'Hisd'];
+/** Room above a block that is not the tracing when it is the first thing on the page. */
+const BLOCK_TOP_PAD = 8;
+
+/**
+ * The blocks of a frame, top to bottom. Without intracardiac channels a frame is the tracing over the
+ * ladder, as it always was; with them the reader chooses the order (a figure is printed the way it is
+ * read). Unknown names and repeats are dropped, a missing block goes last.
+ */
+export function blockOrder(order, hasEgm = false) {
+    const known = hasEgm ? ['strip', 'egm', 'ladder'] : ['strip', 'ladder'];
+    const list = [];
+    for (const b of Array.isArray(order) ? order : []) if (known.includes(b) && !list.includes(b)) list.push(b);
+    for (const b of known) if (!list.includes(b)) list.push(b);
+    return list;
+}
+
+function layoutEgm(top, channels, { letters = true, brackets = false } = {}) {
+    let y = top;
+    const rows = {};
+    let lettersY = null, bracketTop = null;
+    const his = channels.filter(c => HIS_CHANNELS.includes(c));
+    for (const ch of channels) {
+        if (letters && ch === his[0]) { y += EGM_LETTER_H; lettersY = y - 3; }
+        rows[ch] = { top: y, bottom: y + EGM_ROW_H, mid: y + EGM_ROW_H / 2 };
+        y += EGM_ROW_H;
+        if (brackets && ch === his[his.length - 1]) { bracketTop = y; y += BRACKET_ROW_H; }
+    }
+    return { top, bottom: y, rows, channels: channels.slice(), lettersY, bracketTop };
+}
+
+/**
+ * @param order  the blocks top to bottom, e.g. ['strip', 'egm', 'ladder'] (blockOrder)
+ * @param egm    { channels: string[], letters?: boolean, brackets?: boolean } — the intracardiac block, or null
+ */
 export function makeLayout({ stripH = 160, gap = 26, groups = [DEFAULT_TIERS], groupGap = 30, footer = 30,
                              titles = false, captionLines = [], style = 'bands', styles = [], bracketRows = [],
-                             catalog = TIER_CATALOG } = {}) {
+                             catalog = TIER_CATALOG, order = null, egm = null } = {}) {
     // one style per ladder (a figure may show both kinds); `style` is the default
     const styleOf = (g) => (styles[g] === 'lines' || styles[g] === 'bands' ? styles[g] : style);
-    let y = stripH + gap + (styleOf(0) === 'lines' ? 12 : 0);
-    const out = groups.map((tiers, g) => {
+    const channels = egm && Array.isArray(egm.channels) ? egm.channels.filter(c => typeof c === 'string' && c) : [];
+    const blocks = blockOrder(order, channels.length > 0);
+    let y = 0, stripTop = 0, egmOut = null, out = null;
+    blocks.forEach((block, bi) => {
+        if (bi > 0) y += gap;
+        else if (block !== 'strip') y += BLOCK_TOP_PAD;
+        if (block === 'strip') { stripTop = y; y += stripH; return; }
+        if (block === 'egm') { egmOut = layoutEgm(y, channels, egm); y = egmOut.bottom; return; }
+        y += styleOf(0) === 'lines' ? 12 : 0;
+        out = ladderGroups();
+    });
+    function ladderGroups() { return groups.map((tiers, g) => {
         const st = styleOf(g);
         if (titles) y += g > 0 ? TITLE_ROW_H + 10 : TITLE_ROW_H;   // title row (plus separation from the ladder above)
         else if (g > 0) y += groupGap;
@@ -134,9 +197,10 @@ export function makeLayout({ stripH = 160, gap = 26, groups = [DEFAULT_TIERS], g
         if (nCap) y += nCap * CAPTION_LINE_H + (bracketTop != null ? 8 : st === 'lines' ? 16 : 8);
         else if (st === 'lines') y += 10;
         return { tiers: tiers.slice(), bands, top, bottom, captionTop, captionLines: nCap, style: st, bracketTop };
-    });
-    return { stripTop: 0, stripH, gap, groupGap, groups: out, style: styleOf(0), catalog,
+    }); }
+    return { stripTop, stripH, gap, groupGap, groups: out, style: styleOf(0), catalog,
              bands: out[0].bands, tiers: out[0].tiers, ladderTop: out[0].top, ladderBottom: out[0].bottom,
+             order: blocks, egm: egmOut,
              bottom: y, height: y + footer };
 }
 
@@ -161,9 +225,15 @@ export function makeView({ speedMmS = 25, t0Ms = 0, labelW = LABEL_W, gainMmMv =
     };
 }
 
-/** Which zone a y falls in: 'strip', 'gap', a tier of the editable ladder, 'layer', or null. */
+/** Which zone a y falls in: 'strip', 'egm', 'gap', a tier of the editable ladder, 'layer', or null. */
 export function zoneOf(layout, y) {
-    if (y >= 0 && y <= layout.stripH) return 'strip';
+    const st = layout.stripTop ?? 0, sb = st + layout.stripH;
+    if (y >= st && y <= sb) return 'strip';
+    const E = layout.egm;
+    if (E && y >= E.top && y <= E.bottom) return 'egm';
+    // the gap is the space under the tracing, down to whichever block comes next
+    const egmBelow = E && E.top > sb ? E.top : Infinity;
+    const inGap = (ladderBelow) => { const next = Math.min(ladderBelow, egmBelow); return next < Infinity && y > sb && y < next; };
     if ((layout.groups[0]?.style ?? layout.style) === 'lines') {
         // a tier is its line: the nearest line within half a gap
         let best = null;
@@ -172,7 +242,7 @@ export function zoneOf(layout, y) {
             if (d <= LINE_GAP / 2 && (!best || d < best.d)) best = { t, d };
         }
         if (best) return best.t;
-        if (y > layout.stripH && y < layout.ladderTop - LINE_GAP / 2) return 'gap';
+        if (inGap(layout.ladderTop > sb ? layout.ladderTop - LINE_GAP / 2 : Infinity)) return 'gap';
         if (layout.groups.slice(1).some(g => y >= g.top - layout.groupGap && y <= g.bottom + LINE_GAP / 2)) return 'layer';
         return null;
     }
@@ -180,7 +250,7 @@ export function zoneOf(layout, y) {
         const b = layout.bands[t];
         if (y >= b.top && y <= b.bottom) return t;
     }
-    if (y > layout.stripH && y < layout.ladderTop) return 'gap';
+    if (inGap(layout.ladderTop > sb ? layout.ladderTop : Infinity)) return 'gap';
     if (layout.groups.slice(1).some(g => y >= g.top - layout.groupGap && y <= g.bottom)) return 'layer';
     return null;
 }
@@ -191,7 +261,8 @@ export function zoneOf(layout, y) {
  */
 export function hitTest({ view, layout, beats, atrial }, x, y, tolPx = 7) {
     const zone = zoneOf(layout, y);
-    if (!zone || zone === 'layer') return zone ? { zone } : null;
+    // layers are read-only, and the intracardiac channels are drawn from the reading, not marked
+    if (!zone || zone === 'layer' || zone === 'egm') return zone ? { zone } : null;
     const kind = (layout.catalog ?? TIER_CATALOG)[zone]?.kind ?? 'both';
     const wantA = kind !== 'ventricular';
     const wantV = kind !== 'atrial';
@@ -563,12 +634,12 @@ export function resolveBrackets(brackets, view, layout, g) {
     for (const b of brackets) {
         const onStrip = b.row === 'strip';
         if (!onStrip && G.bracketTop == null) continue;
-        const y = onStrip ? layout.stripH + 8 : G.bracketTop + 8;
+        const y = onStrip ? (layout.stripTop ?? 0) + layout.stripH + 8 : G.bracketTop + 8;
         const xa = view.xOf(b.t0), xb = view.xOf(b.t1);
         const guides = [];
         for (const [x, at] of [[xa, b.at0], [xb, b.at1]]) {
             if (!at) continue;
-            const y0 = at.tier === 'strip' ? layout.stripH * 0.58 : yOf(layout, at.tier, at.frac ?? 0, g);
+            const y0 = at.tier === 'strip' ? (layout.stripTop ?? 0) + layout.stripH * 0.58 : yOf(layout, at.tier, at.frac ?? 0, g);
             if (!Number.isFinite(y0)) continue;
             guides.push({ x, y0 });
         }
@@ -669,19 +740,28 @@ export function resolveMarkers({ beats = [], atrial = [] }, view, layout, { sele
     return out;
 }
 
-/** One marker: a line (or tick) over the tracing, a dashed guide down to its tier, the handle at the foot. */
-export function drawMarkerPx(ctx, m, stripH, markerLines) {
+/**
+ * One marker: a line (or tick) over the tracing, a dashed guide down to its tier, the handle at the foot.
+ * @param strip  the strip's height (a strip at the top of the page), or { top, h, guide } — `guide: false`
+ *               when something else is drawn between the tracing and the ladder (the intracardiac channels)
+ *               or the ladder sits above the tracing: a guide would then run across it
+ */
+export function drawMarkerPx(ctx, m, strip, markerLines) {
+    const top = typeof strip === 'number' ? 0 : (strip?.top ?? 0);
+    const stripH = typeof strip === 'number' ? strip : strip.h;
+    const guide = typeof strip === 'number' ? true : strip.guide !== false;
     // dy drops a handle into a second row. A P onset and a QRS onset can fall at the same millisecond on a
     // fast rhythm, and two triangles at one x are one triangle: neither can be seen or aimed at.
     const { x, color, sel, user, tierTop, dy = 0 } = m;
-    const foot = stripH + dy;
+    const bottom = top + stripH;
+    const foot = bottom + dy;
     ctx.strokeStyle = sel ? COL_SEL : color;
     ctx.globalAlpha = sel ? 1 : 0.55;
     ctx.lineWidth = sel ? 2.2 : 1.2;
     // full line across the tracing (editing), or — figures — only a short tick above the handle
-    ctx.beginPath(); ctx.moveTo(x, markerLines || sel ? 0 : stripH - 16); ctx.lineTo(x, stripH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, markerLines || sel ? top : bottom - 16); ctx.lineTo(x, bottom); ctx.stroke();
     ctx.globalAlpha = 0.35; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x, stripH); ctx.lineTo(x, tierTop); ctx.stroke();
+    if (guide) { ctx.beginPath(); ctx.moveTo(x, bottom); ctx.lineTo(x, tierTop); ctx.stroke(); }
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     // handle at the strip foot: filled = auto, hollow = user
@@ -693,13 +773,16 @@ export function drawMarkerPx(ctx, m, stripH, markerLines) {
 
 // ─── the label column and the footer ──────────────────────────────────────────
 
-/** The white column at the left with the rule, the lead name, and the tag lines under it. */
-export function drawLabelColumn(ctx, x0, H, bottom, { lead = '', tags = [] } = {}) {
+/**
+ * The white column at the left with the rule, the lead name, and the tag lines under it. `top` is where the
+ * tracing starts: the lead name and its speed and gain are written beside it, wherever it is on the page.
+ */
+export function drawLabelColumn(ctx, x0, H, bottom, { lead = '', tags = [], top = 0 } = {}) {
     ctx.fillStyle = COLORS.PAGE; ctx.fillRect(0, 0, x0, H);
     ctx.strokeStyle = COLORS.RULE; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x0 - 0.5, 0); ctx.lineTo(x0 - 0.5, bottom); ctx.stroke();
-    text(ctx, lead || '', 6, 16, { color: INK, font: FONTS.lead, align: 'left' });
-    for (const t of tags) text(ctx, t.text, 6, t.y, { align: 'left', font: t.font, ...(t.color ? { color: t.color } : {}) });
+    text(ctx, lead || '', 6, top + 16, { color: INK, font: FONTS.lead, align: 'left' });
+    for (const t of tags) text(ctx, t.text, 6, top + t.y, { align: 'left', font: t.font, ...(t.color ? { color: t.color } : {}) });
 }
 
 /** Every tier's name, right-aligned against the rule, for every group. */
@@ -713,6 +796,93 @@ export function drawTierLabels(ctx, layout, x0) {
             const y = lines ? b.top + 4 : (b.top + b.bottom) / 2 + 4;       // on the line, or in the middle of the band
             text(ctx, lab, x0 - 6, y, { color: INK, font: small ? FONTS.tierSmall : FONTS.tier, align: 'right' });
         }
+    }
+}
+
+// ─── intracardiac channels ────────────────────────────────────────────────────
+
+/**
+ * The letters A · H · V over the His deflections, in pixels. A letter closer than 9 px to the one before it
+ * is left out: two letters in one place are neither of them readable.
+ * @param schedule  egmSchedule() (egm.js): { letters: [{ tMs, centerMs, text }] }
+ */
+export function resolveEgmLetters(schedule, view, layout, { x0 = -Infinity, x1 = Infinity } = {}) {
+    const E = layout.egm;
+    if (!E || E.lettersY == null || !schedule?.letters) return [];
+    const out = [];
+    let lastX = -Infinity;
+    for (const l of schedule.letters) {
+        const x = view.xOf(l.tMs + (l.centerMs || 0));
+        if (!(x >= x0 + 4 && x <= x1 - 4) || x - lastX < 9) continue;
+        out.push({ x, y: E.lettersY, text: l.text });
+        lastX = x;
+    }
+    return out;
+}
+
+/**
+ * AH and HV on one beat, as dimension lines under the His channel: the beat asked for, or the first one on
+ * screen whose atrial deflection on the His catheter, His deflection and ventricular onset the reading
+ * places. Values of the reading — plausible, not measured (PREMISES.md §5).
+ */
+export function resolveEgmBrackets(schedule, view, layout, { beatId = null, x0 = -Infinity, x1 = Infinity } = {}) {
+    const E = layout.egm;
+    if (!E || E.bracketTop == null || !schedule?.beats?.length) return [];
+    const row = E.rows.Hisd || E.rows.His || E.rows.Hisp;
+    if (!row) return [];
+    const measurable = schedule.beats.filter(b => b.tHisA != null && b.tH != null && b.tV != null);
+    const onScreen = (b) => view.xOf(b.tHisA) >= x0 + 30 && view.xOf(b.tV) <= x1 - 30;
+    const b = (beatId != null ? measurable.find(x => x.beatId === beatId) : null) || measurable.find(onScreen);
+    if (!b) return [];
+    const y = E.bracketTop + 8;
+    const xa = view.xOf(b.tHisA), xh = view.xOf(b.tH), xv = view.xOf(b.tV);
+    return [
+        { xa, xb: xh, y, guides: [{ x: xa, y0: row.mid }, { x: xh, y0: row.mid }], label: `AH ${Math.round(b.AH)}`, onStrip: false, first: true, interior: false },
+        { xa: xh, xb: xv, y, guides: [{ x: xv, y0: row.mid }], label: `HV ${Math.round(b.HV)}`, onStrip: false, first: false, interior: false },
+    ];
+}
+
+/**
+ * The intracardiac channels under the page's one time axis: time lines every 100 ms (every second when
+ * 100 ms is too narrow to be worth a line), one trace per channel in ink, the letters over the His
+ * deflections and the AH / HV brackets. Nothing is drawn when the layout has no intracardiac block.
+ * @param egm  { schedule, samples: { fs, channels: { [ch]: Float32Array } }, showLetters, showAhHv, bracketBeatId }
+ * @returns the bracket label boxes, as drawBracketsPx returns them
+ */
+export function drawEgmBlock(ctx, view, layout, egm, { x0, x1 }) {
+    const E = layout.egm;
+    if (!E || !egm?.samples) return [];
+    const step = Math.abs(view.xOf(100) - view.xOf(0)) >= 12 ? 100 : 1000;
+    const tA = view.tOf(x0), tB = view.tOf(x1);
+    ctx.lineWidth = 1;
+    for (const bold of [false, true]) {
+        ctx.strokeStyle = bold ? COLORS.EGM_TIMELINE_BOLD : COLORS.EGM_TIMELINE;
+        ctx.beginPath();
+        for (let t = Math.ceil(tA / step) * step; t <= tB; t += step) {
+            if ((t % 1000 === 0) !== bold) continue;
+            const x = Math.round(view.xOf(t)) + 0.5;
+            ctx.moveTo(x, E.top); ctx.lineTo(x, E.bottom);
+        }
+        ctx.stroke();
+    }
+    const { fs } = egm.samples;
+    for (const ch of E.channels) {
+        const sig = egm.samples.channels?.[ch];
+        if (sig) drawTrace(ctx, { sig, fs, gaps: null }, view, x0, x1, E.rows[ch].mid, EGM_GAIN_PX, INK);
+    }
+    if (egm.showLetters !== false) {
+        for (const l of resolveEgmLetters(egm.schedule, view, layout, { x0, x1 })) text(ctx, l.text, l.x, l.y, { color: INK, font: FONTS.egmLetter });
+    }
+    return egm.showAhHv ? drawBracketsPx(ctx, resolveEgmBrackets(egm.schedule, view, layout, { beatId: egm.bracketBeatId ?? null, x0, x1 })) : [];
+}
+
+/** Every channel's name, right-aligned against the rule, beside its trace. */
+export function drawEgmLabels(ctx, layout, x0) {
+    const E = layout.egm;
+    if (!E) return;
+    for (const ch of E.channels) {
+        const lab = EGM_CHANNEL_LABELS[ch] ?? ch;
+        text(ctx, lab, x0 - 6, E.rows[ch].mid + 4, { color: INK, font: lab.length > 4 ? FONTS.tierSmall : FONTS.tier, align: 'right' });
     }
 }
 
@@ -747,27 +917,30 @@ export function drawFooter(ctx, x0, bottom, lines) {
  *                      caller knows them; otherwise they follow o.bare and o.view.printScale as before
  * @param o.xEnd        where the ladder ends, when that is not the page's right edge (a strip that does
  *                      not fill the width): tiers, paper and the clip stop there
+ * @param o.egm         { schedule, samples, showLetters, showAhHv, bracketBeatId } — the intracardiac channels,
+ *                      drawn in the layout's egm block (makeLayout({ egm })); both products pass the same object
  * @returns { labels: Set[], brackets: [{ g, i, box }] }  what was placed, for hit-testing
  */
 export function drawFrame(ctx, o) {
     const { view, layout, cssW, strip, beats = [], atrial = [], ladder, layers = [], selected = null,
             showIntervals = true, markerLines = true, footerText = null, current = {}, bare = false,
             groupsPx = null, paintStrip = null, markersPx = null, footerLines = null, lead = null, tags = null,
-            xEnd = null } = o;
+            xEnd = null, egm = null } = o;
     const H = layout.height;
     // Where the ladder ends. Normally the page's right edge; an editor whose strip does not fill the page
     // passes the strip's own edge, so tiers, paper and marks stop where the tracing stops rather than
     // running on over blank paper.
     const x0 = view.labelW, x1 = Math.min(cssW, xEnd ?? cssW);
+    const stripTop = layout.stripTop ?? 0, stripBottom = stripTop + layout.stripH;
     ctx.save();
     ctx.fillStyle = COLORS.PAGE; ctx.fillRect(0, 0, cssW, H);
-    if (paintStrip) paintStrip(ctx, { x0, x1, stripH: layout.stripH });
+    if (paintStrip) paintStrip(ctx, { x0, x1, stripH: layout.stripH, stripTop });
     else {
-        ctx.fillStyle = COLORS.PAPER; ctx.fillRect(x0, 0, x1 - x0, layout.stripH);
-        drawGrid(ctx, view, x0, x1, 0, layout.stripH);
+        ctx.fillStyle = COLORS.PAPER; ctx.fillRect(x0, stripTop, x1 - x0, layout.stripH);
+        drawGrid(ctx, view, x0, x1, stripTop, stripBottom);
         ctx.save();
-        ctx.beginPath(); ctx.rect(x0, 0, x1 - x0, layout.stripH); ctx.clip();
-        drawTrace(ctx, strip, view, x0, x1, layout.stripH * 0.58, view.pxPerMv);
+        ctx.beginPath(); ctx.rect(x0, stripTop, x1 - x0, layout.stripH); ctx.clip();
+        drawTrace(ctx, strip, view, x0, x1, stripTop + layout.stripH * 0.58, view.pxPerMv);
         ctx.restore();
     }
 
@@ -775,7 +948,13 @@ export function drawFrame(ctx, o) {
 
     ctx.save();
     ctx.beginPath(); ctx.rect(x0, 0, x1 - x0, H); ctx.clip();
-    for (const m of markersPx ?? resolveMarkers({ beats, atrial }, view, layout, { selected, visible })) drawMarkerPx(ctx, m, layout.stripH, markerLines);
+    // A guide runs from the tracing down to the ladder, so only where nothing else sits between the two.
+    const E = layout.egm;
+    const guideTo = (tierTop) => tierTop >= stripBottom && !(E && E.top >= stripBottom && E.bottom <= tierTop);
+    for (const m of markersPx ?? resolveMarkers({ beats, atrial }, view, layout, { selected, visible })) {
+        drawMarkerPx(ctx, m, { top: stripTop, h: layout.stripH, guide: guideTo(m.tierTop) }, markerLines);
+    }
+    if (egm && E) drawEgmBlock(ctx, view, layout, egm, { x0, x1 });
 
     const placed = [];
     // Where each bracket's label landed, so an editor can let the reader take hold of it.
@@ -809,8 +988,9 @@ export function drawFrame(ctx, o) {
             tagLines.push({ text: `${fmtNum(view.pxPerMv / view.pxPerMm * view.printScale)} mm/mV`, y: 45, font: FONTS.tagPrint, color: INK });
         }
     }
-    drawLabelColumn(ctx, x0, H, layout.bottom, { lead: lead ?? strip?.label ?? '', tags: tagLines });
+    drawLabelColumn(ctx, x0, H, layout.bottom, { lead: lead ?? strip?.label ?? '', tags: tagLines, top: stripTop });
     drawTierLabels(ctx, layout, x0);
+    if (egm && layout.egm) drawEgmLabels(ctx, layout, x0);
     const foot = footerLines ?? (footerText ? [footerText] : []);
     if (foot.length) drawFooter(ctx, x0, layout.bottom, foot);
     ctx.restore();
@@ -826,8 +1006,9 @@ export function drawFrame(ctx, o) {
 export function drawIntervals(ctx, view, layout, ladder, beats, atrial, visible, skipPrAt = [], o = {}) {
     const bById = new Map(beats.map(b => [b.id, b]));
     const font = FONTS.interval;
-    const rrY = o.rrY ?? 12;
-    const gapY = o.gapY ?? (layout.stripH + layout.gap / 2 + 4);
+    const stripTop = layout.stripTop ?? 0;
+    const rrY = o.rrY ?? stripTop + 12;
+    const gapY = o.gapY ?? (stripTop + layout.stripH + layout.gap / 2 + 4);
     for (const iv of ladder.intervals) {
         const b = bById.get(iv.beatId);
         if (!b || !visible(b.qrsOnMs)) continue;
