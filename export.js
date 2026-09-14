@@ -43,13 +43,16 @@ const atrialOut = (a) => ({ id: a.id, tMs: a.tMs, source: a.source || 'auto',
                             ...(a.blockedAt === 'AV' || a.blockedAt === 'His' ? { blockedAt: a.blockedAt } : {}) });
 
 export function toLaddergramJson({ filename = null, lead = null, fs = null, durationMs = null, speed = null,
-                                   beats, atrial, mechanism, params, tiers = null, ladder, layers = [], title = '', caption = '', style = 'bands', brackets = null }) {
+                                   beats, atrial, mechanism, params, tiers = null, ladder, layers = [], title = '', caption = '', style = 'bands', brackets = null,
+                                   styleOverrides = null, hiddenKeys = null }) {
     return {
         format: FORMAT, version: FORMAT_VERSION, createdAt: new Date().toISOString(),
         source: { filename, lead, fs, durationMs },
         display: { speedMmS: speed },
         mechanism, params, tiers: normalizeTiers(tiers || ladder?.tiers), title: title || '', caption: caption || '', style: cleanStyle(style) || 'bands',
         ...(cleanBrackets(brackets) ? { brackets: cleanBrackets(brackets) } : {}),
+        ...(cleanRestyle(styleOverrides) ? { styleOverrides: cleanRestyle(styleOverrides) } : {}),
+        ...(cleanHidden(hiddenKeys) ? { hiddenKeys: cleanHidden(hiddenKeys) } : {}),
         beats: beats.map(beatOut),
         atrial: atrial.map(atrialOut),
         ladder: { tiers: ladder.tiers, events: ladder.events, paths: ladder.paths, intervals: ladder.intervals, notes: ladder.notes },
@@ -57,11 +60,34 @@ export function toLaddergramJson({ filename = null, lead = null, fs = null, dura
         layers: layers.map(l => ({ id: l.id, title: l.title ?? l.label ?? '', caption: l.caption || '', mechanism: l.mechanism, params: l.params || {},
                                    tiers: normalizeTiers(l.tiers), beats: l.beats.map(beatOut), atrial: l.atrial.map(atrialOut),
                                    ...(cleanStyle(l.style) ? { style: l.style } : {}),
-                                   ...(cleanBrackets(l.brackets) ? { brackets: cleanBrackets(l.brackets) } : {}) })),
+                                   ...(cleanBrackets(l.brackets) ? { brackets: cleanBrackets(l.brackets) } : {}),
+                                   ...(cleanRestyle(l.styleOverrides) ? { styleOverrides: cleanRestyle(l.styleOverrides) } : {}),
+                                   ...(cleanHidden(l.hiddenKeys) ? { hiddenKeys: cleanHidden(l.hiddenKeys) } : {}) })),
     };
 }
 
 const cleanStyle = (st) => (st === 'lines' || st === 'bands' ? st : null);
+/**
+ * What the reader restyled about one drawing, read back with only the keys the renderer acts on. A file
+ * carries it because the alternative is a saved figure that reopens as the engine's unaided picture — the
+ * same reason the per-beat answers travel.
+ */
+const RESTYLE_KEYS = ['dxMs', 'dFrac', 'color', 'style', 'hollow', 'terminal', 'arrow', 'curve', 'label'];
+function cleanRestyle(o) {
+    if (!o || typeof o !== 'object') return null;
+    const out = {};
+    for (const [key, v] of Object.entries(o)) {
+        if (typeof key !== 'string' || !v || typeof v !== 'object') continue;
+        const kept = {};
+        for (const k of RESTYLE_KEYS) if (v[k] !== undefined && v[k] !== null) kept[k] = v[k];
+        if (Object.keys(kept).length) out[key] = kept;
+    }
+    return Object.keys(out).length ? out : null;
+}
+const cleanHidden = (a) => {
+    const out = (Array.isArray(a) ? a : []).filter(k => typeof k === 'string');
+    return out.length ? out : null;
+};
 /** SP/PH/HV annotation: { beatId } or { beat: index }. */
 const cleanBrackets = (b) => (b && (typeof b.beatId === 'string' || Number.isInteger(b.beat)) ? (typeof b.beatId === 'string' ? { beatId: b.beatId } : { beat: b.beat }) : null);
 
@@ -79,11 +105,13 @@ export function fromLaddergramJson(obj) {
         .filter(l => l && Array.isArray(l.beats))
         .map((l, i) => ({ id: String(l.id || `L${i}`), title: String(l.title ?? l.label ?? ''), caption: String(l.caption || ''), mechanism: l.mechanism || 'avnodal',
                           params: l.params || {}, tiers: normalizeTiers(l.tiers), beats: cleanBeats(l.beats), atrial: cleanAtrial(l.atrial),
-                          ...(cleanStyle(l.style) ? { style: l.style } : {}), brackets: cleanBrackets(l.brackets) }));
+                          ...(cleanStyle(l.style) ? { style: l.style } : {}), brackets: cleanBrackets(l.brackets),
+                          styleOverrides: cleanRestyle(l.styleOverrides) || {}, hiddenKeys: cleanHidden(l.hiddenKeys) || [] }));
     return { beats: cleanBeats(obj.beats), atrial: cleanAtrial(obj.atrial), mechanism: obj.mechanism || 'avnodal',
              params: obj.params || {}, tiers: normalizeTiers(obj.tiers), layers, source: obj.source || {},
              title: String(obj.title || ''), caption: String(obj.caption || ''), style: cleanStyle(obj.style) || 'bands',
-             brackets: cleanBrackets(obj.brackets) };
+             brackets: cleanBrackets(obj.brackets),
+             styleOverrides: cleanRestyle(obj.styleOverrides) || {}, hiddenKeys: cleanHidden(obj.hiddenKeys) || [] };
 }
 
 /** Clip a path to [tMin, tMax] on the time axis; null if nothing is left. `level` maps a point to its continuous height. */

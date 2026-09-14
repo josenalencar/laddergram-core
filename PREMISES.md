@@ -125,6 +125,13 @@ submission): every one of them was an error the previous rule produced.
   infra-His (long) 2:1 block. The legend says they are assumed values.
 - Figures of the Heart Rhythm submission: Figure 1 (real ECG, 2.4 s) 75 mm/s, 10 mm/mV; Figures 2–6
   (synthetic, 4–6 s) 25 mm/s, 5 mm/mV (10 mm/mV would clip the synthetic QRS in the strip).
+- **Nothing a figure writes is written over something else** (**2026-09-14**). A panel's letter and title sit
+  in a row of their own, `TITLE_ROW_H` tall, clear of the dots drawn on the first tier line — at 8 px above
+  the line their descenders were within 2 px of a dot, so a panel whose first activation is at the very start
+  of the strip had its title and its first dot in the same pixels. Two bracket labels that would overlap are
+  not centred over each other: the second drops a line. A bracket may carry its own colour and a nudge for its
+  label, and a drawn event its own colour, because a reader restyling one element of a figure must not have to
+  restyle the rest to keep it legible.
 
 ## 6. Synthetic ECGs
 

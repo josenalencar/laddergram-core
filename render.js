@@ -95,6 +95,17 @@ export const LINE_GAP = 38;
  *                      editor adds its own entries for tiers a user named themselves.
  */
 export const BRACKET_ROW_H = 30;
+/**
+ * The row a ladder's letter and title live in, above its first tier line.
+ *
+ * It used to be 26 with the words pinned 8 px above the line, which put their descenders within 2 px of
+ * the dots drawn ON that line — so on a strip whose first activation is at the very start, the title and
+ * the first dot were the same pixels. The words sit at the top of the row now, with the line well clear
+ * below them, as the published figures have them.
+ */
+export const TITLE_ROW_H = 36;
+/** Baseline of the letter and title, above the group's first tier line. */
+export const TITLE_BASELINE = 18;
 
 /** How many 15 px rows a caption takes: one per 140 characters, at most three. */
 export const capLines = (c) => (c ? Math.min(3, Math.ceil(String(c).length / 140)) : 0);
@@ -107,7 +118,7 @@ export function makeLayout({ stripH = 160, gap = 26, groups = [DEFAULT_TIERS], g
     let y = stripH + gap + (styleOf(0) === 'lines' ? 12 : 0);
     const out = groups.map((tiers, g) => {
         const st = styleOf(g);
-        if (titles) y += g > 0 ? 34 : 26;               // title row (plus separation from the ladder above)
+        if (titles) y += g > 0 ? TITLE_ROW_H + 10 : TITLE_ROW_H;   // title row (plus separation from the ladder above)
         else if (g > 0) y += groupGap;
         if (g > 0 && st === 'lines') y += 8;             // room for the dots and asterisks on the first line
         const top = y, bands = {};
@@ -404,7 +415,9 @@ export function drawAsterisk(ctx, x, y, r = 5.5) {
  */
 export function drawEventPx(ctx, e) {
     if (e.style === 'none') return;
-    ctx.strokeStyle = ctx.fillStyle = e.highlight ? COL_SEL : INK;
+    // A dot may carry its own colour, as a path does. Selection still wins: what is highlighted has to
+    // look highlighted whatever colour the reader gave it.
+    ctx.strokeStyle = ctx.fillStyle = e.highlight ? COL_SEL : (e.color || INK);
     if (e.style === 'asterisk') { drawAsterisk(ctx, e.x, e.y); return; }
     ctx.beginPath(); ctx.arc(e.x, e.y, 3.3, 0, Math.PI * 2);
     if (e.hollow) { ctx.fillStyle = COLORS.HOLLOW; ctx.fill(); ctx.lineWidth = 1.6; ctx.stroke(); }
@@ -476,10 +489,10 @@ export function drawTierGroup(ctx, layout, g, { x0, x1, letter = null, title = n
         let x = x0 + 6;
         if (letter) {
             ctx.font = FONTS.letter;
-            text(ctx, letter, x, G.top - 8, { align: 'left', color: INK, font: ctx.font });
+            text(ctx, letter, x, G.top - TITLE_BASELINE, { align: 'left', color: INK, font: ctx.font });
             x += ctx.measureText(letter).width + 8;
         }
-        if (title) text(ctx, title, x, G.top - 8, { align: 'left', color: INK, font: FONTS.title });
+        if (title) text(ctx, title, x, G.top - TITLE_BASELINE, { align: 'left', color: INK, font: FONTS.title });
     }
     if (caption && G.captionLines) {
         ctx.font = FONTS.caption;
@@ -516,8 +529,12 @@ export function resolveGroup(ladder, view, layout, g, { selected = null, visible
         if (e.style === 'none' || !visible(e.tMs) || !G.bands[e.tier]) continue;
         events.push({
             x: view.xOf(e.tMs), y: yOf(layout, e.tier, e.frac, g),
-            style: e.style === 'asterisk' ? 'asterisk' : 'dot', hollow: e.source === 'user',
+            style: e.style === 'asterisk' ? 'asterisk' : 'dot',
+            // Open = measured on the tracing, filled = inferred. The engine says which by where the mark
+            // came from; a reader restyling one dot says it outright, and a colour travels the same way.
+            hollow: e.hollow != null ? !!e.hollow : e.source === 'user',
             highlight: !!(selId && (e.beatId === selId || e.atrialId === selId)),
+            ...(e.color ? { color: e.color } : {}),
         });
     }
     return { paths, events };
@@ -556,19 +573,35 @@ export function resolveBrackets(brackets, view, layout, g) {
             guides.push({ x, y0 });
         }
         const k = rowBrackets.indexOf(b), last = rowBrackets.length - 1;
-        out.push({ xa, xb, y, guides, label: b.label, onStrip, first: k === 0, interior: k > 0 && k < last });
+        // A bracket on a figure is a drawn element like any other: the reader may recolour it, retype it
+        // and move its label off a collision. What they have not touched keeps the house style.
+        out.push({ xa, xb, y: y + (b.dy || 0), guides, label: b.label, onStrip, first: k === 0, interior: k > 0 && k < last,
+                   ...(b.color ? { color: b.color } : {}), ...(b.labelDx ? { labelDx: b.labelDx } : {}), ...(b.labelDy ? { labelDy: b.labelDy } : {}) });
     }
     return out;
 }
 
-/** The brackets of one ladder, in pixels: guides, the dimension line with inward arrowheads, the label. */
+/**
+ * The brackets of one ladder, in pixels: guides, the dimension line with inward arrowheads, the label.
+ * Returns the box each label was drawn in, so an editor can let the reader take hold of it.
+ */
 export function drawBracketsPx(ctx, list) {
-    if (!list.length) return;
+    const boxes = [];
+    if (!list.length) return boxes;
     const font = FONTS.bracket;
     ctx.font = font;
-    for (const b of list) {
+    // Where a label has already been written on this row. Two brackets of the same beat sit side by side
+    // and their labels are wider than the spans they belong to, so without this the words print on top of
+    // each other -- which is what "HV 43" and "VA 69" did to one another on a figure with three beats
+    // measured. A label that would collide drops to the next line rather than being centred over the mess.
+    const written = [];
+    const collides = (b) => written.some(w => b[0] < w[2] + 3 && b[2] > w[0] - 3 && b[1] < w[3] + 2 && b[3] > w[1] - 2);
+    const LINE = 12;
+    for (let i = 0; i < list.length; i++) {
+        const b = list[i];
         const { xa, xb, y } = b;
-        ctx.strokeStyle = BRACKET_COL; ctx.fillStyle = BRACKET_COL; ctx.lineWidth = 1;
+        const col = b.color || BRACKET_COL;
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
         // guides
         ctx.setLineDash([2, 2]);
         for (const gd of b.guides) {
@@ -583,11 +616,24 @@ export function drawBracketsPx(ctx, list) {
         ctx.beginPath(); ctx.moveTo(xa, y - 4); ctx.lineTo(xa, y + 4); ctx.moveTo(xb, y - 4); ctx.lineTo(xb, y + 4); ctx.stroke();
         // the label sits under its bracket when it fits; a short bracket at either end of the row puts
         // it outside (left of the first, right of the last) so neighbouring labels never collide
+        if (!b.label) continue;
         const w = ctx.measureText(b.label).width;
-        if (w + 6 <= xb - xa || b.onStrip || b.interior) text(ctx, b.label, (xa + xb) / 2, y + 15, { font, color: BRACKET_COL });
-        else if (b.first) text(ctx, b.label, xa - 6, y + 4, { font, color: BRACKET_COL, align: 'right' });
-        else text(ctx, b.label, xb + 6, y + 4, { font, color: BRACKET_COL, align: 'left' });
+        const dx = b.labelDx || 0, dy = b.labelDy || 0;
+        let lx, ly, align;
+        if (w + 6 <= xb - xa || b.onStrip || b.interior) { lx = (xa + xb) / 2 + dx; ly = y + 15 + dy; align = 'center'; }
+        else if (b.first) { lx = xa - 6 + dx; ly = y + 4 + dy; align = 'right'; }
+        else { lx = xb + 6 + dx; ly = y + 4 + dy; align = 'left'; }
+        const x0 = align === 'center' ? lx - w / 2 : align === 'right' ? lx - w : lx;
+        let box = [x0 - 2, ly - 11, x0 + w + 2, ly + 3];
+        for (let row = 0; row < 3 && collides(box); row++) {
+            ly += LINE;
+            box = [box[0], box[1] + LINE, box[2], box[3] + LINE];
+        }
+        text(ctx, b.label, lx, ly, { font, color: col, align });
+        written.push(box);
+        boxes.push({ i, box });
     }
+    return boxes;
 }
 
 /**
@@ -701,7 +747,7 @@ export function drawFooter(ctx, x0, bottom, lines) {
  *                      caller knows them; otherwise they follow o.bare and o.view.printScale as before
  * @param o.xEnd        where the ladder ends, when that is not the page's right edge (a strip that does
  *                      not fill the width): tiers, paper and the clip stop there
- * @returns { labels: Set[] }  the labels placed per group (their boxes), for hit-testing
+ * @returns { labels: Set[], brackets: [{ g, i, box }] }  what was placed, for hit-testing
  */
 export function drawFrame(ctx, o) {
     const { view, layout, cssW, strip, beats = [], atrial = [], ladder, layers = [], selected = null,
@@ -732,13 +778,15 @@ export function drawFrame(ctx, o) {
     for (const m of markersPx ?? resolveMarkers({ beats, atrial }, view, layout, { selected, visible })) drawMarkerPx(ctx, m, layout.stripH, markerLines);
 
     const placed = [];
+    // Where each bracket's label landed, so an editor can let the reader take hold of it.
+    const bracketBoxes = [];
     if (groupsPx) {
         // Frames for every ladder first, then the ladders themselves: a caption or a label that hangs below
         // its own group used to be painted over by the next group's band fill.
         groupsPx.forEach((G, g) => drawTierGroup(ctx, layout, g, { x0, x1, letter: G.letter, title: G.title, caption: G.caption }));
         groupsPx.forEach((G, g) => {
             placed.push(drawResolvedGroup(ctx, G.resolved ?? { paths: [], events: [] }, { x0, rules: tierRules(layout, g) }));
-            if (G.bracketsPx?.length) drawBracketsPx(ctx, G.bracketsPx);
+            if (G.bracketsPx?.length) for (const r of drawBracketsPx(ctx, G.bracketsPx)) bracketBoxes.push({ g, i: r.i, box: r.box });
         });
     } else {
         const common = { x0, x1, visible, beats, atrial, frameDrawn: true };
@@ -766,7 +814,7 @@ export function drawFrame(ctx, o) {
     const foot = footerLines ?? (footerText ? [footerText] : []);
     if (foot.length) drawFooter(ctx, x0, layout.bottom, foot);
     ctx.restore();
-    return { labels: placed };
+    return { labels: placed, brackets: bracketBoxes };
 }
 
 /**
