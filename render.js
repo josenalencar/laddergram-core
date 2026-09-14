@@ -769,15 +769,22 @@ export function drawFrame(ctx, o) {
     return { labels: placed };
 }
 
-export function drawIntervals(ctx, view, layout, ladder, beats, atrial, visible, skipPrAt = []) {
+/**
+ * The measured intervals, written on the figure. `rrY` and `gapY` say where the two rows go: above the
+ * strip and in the gap beneath it, which is right for a drawn tracing with headroom above the trace. A
+ * consumer whose strip is a photograph of ECG paper has no headroom — nothing may be written over the
+ * reader's own tracing — and passes both rows into a gap it has made taller.
+ */
+export function drawIntervals(ctx, view, layout, ladder, beats, atrial, visible, skipPrAt = [], o = {}) {
     const bById = new Map(beats.map(b => [b.id, b]));
     const font = FONTS.interval;
-    const gapY = layout.stripH + layout.gap / 2 + 4;
+    const rrY = o.rrY ?? 12;
+    const gapY = o.gapY ?? (layout.stripH + layout.gap / 2 + 4);
     for (const iv of ladder.intervals) {
         const b = bById.get(iv.beatId);
         if (!b || !visible(b.qrsOnMs)) continue;
         if (iv.RRms != null) {
-            text(ctx, `${Math.round(iv.RRms)}`, view.xOf(b.qrsOnMs - iv.RRms / 2), 12, { font, color: COL_Q });
+            text(ctx, `${Math.round(iv.RRms)}`, view.xOf(b.qrsOnMs - iv.RRms / 2), rrY, { font, color: COL_Q });
         }
         if (iv.PRms != null && !skipPrAt.some(t => Math.abs(t - b.qrsOnMs) < 1)) {
             text(ctx, `${ladder.mechanism === 'flutter' ? 'FR' : 'PR'} ${Math.round(iv.PRms)}`, view.xOf(b.qrsOnMs - iv.PRms / 2), gapY, { font, color: COL_P });
