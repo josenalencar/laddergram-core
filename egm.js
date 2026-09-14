@@ -407,11 +407,12 @@ function jitterOf(d, seed) {
 }
 
 /**
- * The schedule as signals: one Float32Array per channel, `fs` samples per second, with a little seeded noise
- * and baseline drift. The same schedule and seed give the same arrays.
+ * The schedule as signals: one Float32Array per channel, `fs` samples per second from `t0Ms` to `durationMs`
+ * (sample 0 is at t0Ms — a strip whose time axis was set on a grid click has times before zero), with a little
+ * seeded noise and baseline drift. The same schedule, window and seed give the same arrays.
  */
-export function egmSamples(schedule, { fs = 1000, durationMs = schedule?.durationMs, seed = 7, channels = schedule?.channels } = {}) {
-    const n = Math.max(0, Math.round((durationMs || 0) * fs / 1000));
+export function egmSamples(schedule, { fs = 1000, durationMs = schedule?.durationMs, t0Ms = 0, seed = 7, channels = schedule?.channels } = {}) {
+    const n = Math.max(0, Math.round(((durationMs || 0) - t0Ms) * fs / 1000));
     const list = (channels || []).filter(ch => EGM_CHANNELS.includes(ch));
     const out = {};
     list.forEach((ch, ci) => {
@@ -425,7 +426,7 @@ export function egmSamples(schedule, { fs = 1000, durationMs = schedule?.duratio
         const x = out[d.ch];
         if (!x) continue;
         const { amp, stretch } = jitterOf(d, seed);
-        addKernel(x, fs, d.tMs, kernelOf(d), d.amp * amp, stretch);
+        addKernel(x, fs, d.tMs - t0Ms, kernelOf(d), d.amp * amp, stretch);
     }
-    return { fs, n, durationMs: durationMs ?? null, channels: out };
+    return { fs, n, t0Ms, durationMs: durationMs ?? null, channels: out };
 }

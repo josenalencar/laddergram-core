@@ -4,9 +4,9 @@
 // tracing, the channels and the ladder without overlap, with zones, markers and labels following them.
 //
 //   node packages/laddergram-core/test/layout.test.mjs
-import { makeLayout, zoneOf, hitTest, makeView, blockOrder, drawFrame, EGM_ROW_H, EGM_LETTER_H, BRACKET_ROW_H, TITLE_ROW_H } from '../render.js';
+import { makeLayout, zoneOf, hitTest, makeView, blockOrder, drawFrame, drawEgmBlock, resolveEgmLetters, EGM_ROW_H, EGM_LETTER_H, BRACKET_ROW_H, TITLE_ROW_H } from '../render.js';
 import { DEFAULT_TIERS } from '../engine.js';
-import { BLOCK_ORDERS, egmLayoutOptions, DEFAULT_EP } from '../egm.js';
+import { BLOCK_ORDERS, egmLayoutOptions, DEFAULT_EP, egmSamples } from '../egm.js';
 import { makeRecorder } from './mockCanvas.mjs';
 
 let pass = 0, fail = 0;
@@ -106,6 +106,29 @@ section('the frame follows the tracing wherever it is');
     ok('the lead name is written beside the tracing', lead && lead[1][2] === L.stripTop + 16);
     const guides = log.filter(([m, a]) => m === 'lineTo' && (a[1] === L.bands.A.top || a[1] === L.bands.V.top));
     ok('no marker guide runs up from a tracing below the ladder', guides.length === 0);
+}
+
+section('channels on a strip timed from a grid click (times before zero)');
+{
+    const L = makeLayout({ egm: { channels: ['HRA'], letters: true, brackets: false } });
+    const view = makeView({ speedMmS: 100, t0Ms: -2000 });
+    const sch = { channels: ['HRA'], deflections: [{ ch: 'HRA', kind: 'A', tMs: -1500, amp: 1, far: false }], letters: [], beats: [] };
+    const ctx = makeRecorder();
+    drawEgmBlock(ctx, view, L, { schedule: sch, samples: egmSamples(sch, { t0Ms: -2000, durationMs: 1000 }) }, { x0: view.labelW, x1: view.xOf(1000) });
+    const xs = ctx.__log.filter(([m]) => m === 'lineTo').map(([, a]) => a[0]);
+    ok('the trace is drawn from the strip\'s own start, not from zero', xs.some(x => x < view.xOf(-1000)) && xs.some(x => x > view.xOf(500)));
+    const ys = ctx.__log.filter(([m, a]) => m === 'lineTo' && Math.abs(a[0] - view.xOf(-1480)) < 3).map(([, a]) => a[1]);
+    ok('and the deflection before zero is where its time is', Math.max(...ys) - Math.min(...ys) > 6);
+}
+
+section('letters too close to read both');
+{
+    const L = makeLayout({ egm: { channels: ['His'], letters: true, brackets: false } });
+    const view = makeView({ speedMmS: 100, t0Ms: 0 });
+    const letters = (list) => resolveEgmLetters({ letters: list.map(([text, tMs]) => ({ text, tMs, centerMs: 0 })) }, view, L).map(l => l.text).join('');
+    ok('the His letter stays whether A or V comes first', letters([['A', 100], ['H', 110], ['V', 400]]) === 'HV' && letters([['A', 100], ['H', 300], ['V', 310]]) === 'AH');
+    ok('A over V when those two collide', letters([['V', 100], ['A', 105]]) === 'A');
+    ok('letters far enough apart all stay', letters([['A', 100], ['H', 200], ['V', 300]]) === 'AHV');
 }
 
 console.log(`\n${pass} ok, ${fail} fail`);

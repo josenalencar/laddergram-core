@@ -209,5 +209,16 @@ section('samples, channels and settings');
     ok('a Lewis Ladder diagram carries it too', JSON.stringify(lewis.ep) === JSON.stringify(cleanEp(ep)) && !('ep' in toLewisLadderDiagram(ladder, { tMinMs: 0, tMaxMs: 2400 })));
 }
 
+section('a strip whose time axis starts before zero');
+{
+    const sch = { channels: ['HRA'], deflections: [{ ch: 'HRA', kind: 'A', tMs: -500, amp: 1, far: false }] };
+    const peak = (x, i0, i1) => Math.max(...Array.from(x.slice(i0, i1), Math.abs));
+    const from0 = egmSamples(sch, { durationMs: 1000 });
+    const early = egmSamples(sch, { t0Ms: -1000, durationMs: 1000 });
+    ok('the samples cover the window asked for, from its own start', early.n === 2000 && early.t0Ms === -1000 && from0.t0Ms === 0);
+    ok('a deflection before zero is on the signal that starts before zero', peak(early.channels.HRA, 480, 560) > 0.3);
+    ok('and nowhere on one that starts at zero', peak(from0.channels.HRA, 0, 1000) < 0.1);
+}
+
 console.log(`\n${pass} ok, ${fail} fail`);
 if (fail) process.exit(1);

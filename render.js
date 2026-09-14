@@ -801,23 +801,27 @@ export function drawTierLabels(ctx, layout, x0) {
 
 // ─── intracardiac channels ────────────────────────────────────────────────────
 
+const LETTER_RANK = { H: 0, 'H′': 0, A: 1, V: 2 };
+
 /**
- * The letters A · H · V over the His deflections, in pixels. A letter closer than 9 px to the one before it
- * is left out: two letters in one place are neither of them readable.
+ * The letters A · H · V over the His deflections, in pixels. Two letters closer than 9 px are not both
+ * readable, so one is left out — always by the same rule, whatever comes first on the screen: the His letter
+ * stays (it is what the His catheter is there for), then A, then V.
  * @param schedule  egmSchedule() (egm.js): { letters: [{ tMs, centerMs, text }] }
  */
 export function resolveEgmLetters(schedule, view, layout, { x0 = -Infinity, x1 = Infinity } = {}) {
     const E = layout.egm;
     if (!E || E.lettersY == null || !schedule?.letters) return [];
-    const out = [];
-    let lastX = -Infinity;
+    const onScreen = [];
     for (const l of schedule.letters) {
         const x = view.xOf(l.tMs + (l.centerMs || 0));
-        if (!(x >= x0 + 4 && x <= x1 - 4) || x - lastX < 9) continue;
-        out.push({ x, y: E.lettersY, text: l.text });
-        lastX = x;
+        if (x >= x0 + 4 && x <= x1 - 4) onScreen.push({ x, text: l.text });
     }
-    return out;
+    const kept = [];
+    for (const c of onScreen.slice().sort((a, b) => (LETTER_RANK[a.text] ?? 3) - (LETTER_RANK[b.text] ?? 3) || a.x - b.x)) {
+        if (kept.every(k => Math.abs(k.x - c.x) >= 9)) kept.push(c);
+    }
+    return kept.sort((a, b) => a.x - b.x).map(c => ({ x: c.x, y: E.lettersY, text: c.text }));
 }
 
 /**
@@ -846,7 +850,7 @@ export function resolveEgmBrackets(schedule, view, layout, { beatId = null, x0 =
  * The intracardiac channels under the page's one time axis: time lines every 100 ms (every second when
  * 100 ms is too narrow to be worth a line), one trace per channel in ink, the letters over the His
  * deflections and the AH / HV brackets. Nothing is drawn when the layout has no intracardiac block.
- * @param egm  { schedule, samples: { fs, channels: { [ch]: Float32Array } }, showLetters, showAhHv, bracketBeatId }
+ * @param egm  { schedule, samples: { fs, t0Ms?, channels: { [ch]: Float32Array } }, showLetters, showAhHv, bracketBeatId }
  * @returns the bracket label boxes, as drawBracketsPx returns them
  */
 export function drawEgmBlock(ctx, view, layout, egm, { x0, x1 }) {
@@ -866,9 +870,12 @@ export function drawEgmBlock(ctx, view, layout, egm, { x0, x1 }) {
         ctx.stroke();
     }
     const { fs } = egm.samples;
+    // the samples start at their own t0 (a strip timed from a grid click has times before zero)
+    const t0 = egm.samples.t0Ms || 0;
+    const sampleView = t0 ? { ...view, xOf: (t) => view.xOf(t + t0), tOf: (x) => view.tOf(x) - t0 } : view;
     for (const ch of E.channels) {
         const sig = egm.samples.channels?.[ch];
-        if (sig) drawTrace(ctx, { sig, fs, gaps: null }, view, x0, x1, E.rows[ch].mid, EGM_GAIN_PX, INK);
+        if (sig) drawTrace(ctx, { sig, fs, gaps: null }, sampleView, x0, x1, E.rows[ch].mid, EGM_GAIN_PX, INK);
     }
     if (egm.showLetters !== false) {
         for (const l of resolveEgmLetters(egm.schedule, view, layout, { x0, x1 })) text(ctx, l.text, l.x, l.y, { color: INK, font: FONTS.egmLetter });
