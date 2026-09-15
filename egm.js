@@ -169,6 +169,10 @@ export function ventricularSequence(origin) {
         case 'LBBB': return { HisV: 20, RVa: 25, CS910: 85, CS78: 95, CS56: 105, CS34: 115, CS12: 125 };
         // a focus at the RV apex
         case 'RV': return { RVa: 0, HisV: 40, CS910: 70, CS78: 80, CS56: 90, CS34: 100, CS12: 110 };
+        // paced at the base of the right ventricle (the parahisian region): the basal septum first, the apex late
+        case 'RVb': return { HisV: 10, RVa: 45, CS910: 40, CS78: 50, CS56: 60, CS34: 70, CS12: 80 };
+        // parahisian pacing with the His bundle captured: near-normal, the septum first
+        case 'paraHis': return { HisV: 5, RVa: 30, CS910: 40, CS78: 48, CS56: 56, CS34: 64, CS12: 72 };
         // a focus on the lateral left ventricle: the distal coronary sinus first
         case 'LV': return { CS12: 0, CS34: 8, CS56: 16, CS78: 24, CS910: 32, HisV: 50, RVa: 65 };
         // pre-excited over an accessory pathway, from where it inserts
@@ -199,7 +203,7 @@ const r1 = (t) => Math.round(t * 10) / 10;
  * The deflections one activation writes on every channel.
  * @param act  { kind: 'A'|'f'|'H'|'V'|'S', tMs, origin?, site?, prime?, beatId?, atrialId?, n? }
  *             A: origin in atrialSequence; V: origin in ventricularSequence; f: one fibrillatory wave
- *             (n seeds where each channel catches it); S: a stimulus at site 'HRA' | 'RVa'
+ *             (n seeds where each channel catches it); S: a stimulus at site 'HRA' | 'RVa' | 'RVb'
  * @returns [{ ch, kind, tMs, amp, far, beatId, atrialId }]
  */
 export function activationDeflections(act, P = resolveParams({})) {
@@ -235,7 +239,9 @@ export function activationDeflections(act, P = resolveParams({})) {
         push('RVa', 'V', t + q.RVa, 1);
     } else if (act.kind === 'S') {
         push('Stim', 'S', t, 1);
-        push(act.site === 'RVa' ? 'RVa' : 'HRA', 'S', t, 0.9);
+        // the artefact on the catheter that paced: the RV apex, the His catheter's region at the base, the HRA
+        if (act.site === 'RVb') { push('His', 'S', t, 0.9); push('Hisp', 'S', t, 0.9); push('Hisd', 'S', t, 0.9); push('RVa', 'S', t, 0.4); }
+        else push(act.site === 'RVa' ? 'RVa' : 'HRA', 'S', t, 0.9);
     }
     return out;
 }

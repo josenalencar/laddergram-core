@@ -37,6 +37,10 @@ const QRS_SHAPES = {
     LBBB: { II: [[30, 14, 0.7], [95, 20, 0.6]], V1: [[20, 8, 0.1], [70, 25, -1.1]] },
     RV: { II: [[40, 16, 0.9], [110, 22, 0.5]], V1: [[70, 28, -1.2]] },
     LV: { II: [[40, 16, -0.8], [110, 22, -0.3]], V1: [[50, 20, 1.2], [120, 22, 0.4]] },
+    // paced at the base of the right ventricle: LBBB-like, upright inferiorly (the wave leaves the basal septum downwards)
+    RVb: { II: [[35, 15, 0.9], [100, 20, 0.4]], V1: [[60, 26, -1.1]] },
+    // parahisian pacing with the His captured: nearly the normal QRS, a little wider
+    paraHis: { II: [[15, 6, -0.08], [42, 11, 1.0], [70, 10, -0.2]], V1: [[20, 7, 0.2], [52, 14, -0.85]] },
     preLeftLateral: { II: [[25, 16, 0.5], [70, 14, 0.9], [105, 14, -0.2]], V1: [[30, 16, 0.4], [80, 16, 0.7]] },
     preSeptal: { II: [[25, 16, -0.45], [70, 14, -0.6], [110, 14, 0.15]], V1: [[30, 16, 0.3], [80, 16, 0.5]] },
     preRightLateral: { II: [[25, 16, 0.4], [70, 14, 0.8], [110, 14, 0.2]], V1: [[30, 16, -0.4], [80, 18, -0.8]] },
@@ -67,6 +71,7 @@ export function surfaceAt(acts, lead, tMs) {
         } else if (a.kind === 'S') {
             v += G(dt, 0.5, 0.6, 0.6) + G(dt, 3, 3, -0.08);
         }
+        // isoproterenol, adenosine, a shock and a bundle-branch switch write nothing on the surface
     }
     return v;
 }
@@ -216,6 +221,67 @@ export function createSweep({ ctx, cssW, cssH, channels, speedMmS = 100, labelW 
         get channels() { return list.slice(); },
         get speedMmS() { return speed; },
     };
+}
+
+// ─── an episode on paper ────────────────────────────────────────────────────
+
+/** The canvas size (CSS px) an episode needs: the channels as rows, the time at the sweep speed, a header and a log. */
+export function episodeSize({ fromMs, toMs, channels, speedMmS = 100, rowPx = 30, labelW = LABEL_W, logLines = 0 }) {
+    const msPerPx = 1000 / (speedMmS * PX_PER_MM);
+    return { w: Math.ceil(labelW + (toMs - fromMs) / msPerPx) + 8, h: 26 + TOP + rowPx * channels.length + BOTTOM + (logLines ? 10 + 15 * logLines : 0), msPerPx };
+}
+
+/**
+ * Draw an episode of a live heart on a context, left to right at the sweep speed: what the sweep showed, as one
+ * strip — for a figure or a lecture. `sampler` is createSampler(sim); `title` and `log` (lines) are written in.
+ */
+export function drawEpisode(ctx, { sim, sampler = createSampler(sim), fromMs, toMs, channels, speedMmS = 100, title = '', log = [], rowPx = 30, labelW = LABEL_W, colors = EGM_COLORS }) {
+    const { w: W, h: H, msPerPx } = episodeSize({ fromMs, toMs, channels, speedMmS, rowPx, labelW, logLines: log.length });
+    const top = 26 + TOP;
+    ctx.fillStyle = colors.BG; ctx.fillRect(0, 0, W, H);
+    ctx.font = '600 12px -apple-system, "Segoe UI", sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = colors.LABEL;
+    ctx.fillText(`${title ? title + ' — ' : ''}${speedMmS} mm/s · ${((toMs - fromMs) / 1000).toFixed(1)} s`, 6, 17);
+    ctx.strokeStyle = colors.TICK_BOLD; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(labelW - 0.5, top - TOP); ctx.lineTo(labelW - 0.5, top + rowPx * channels.length); ctx.stroke();
+    ctx.font = '600 11px -apple-system, "Segoe UI", sans-serif'; ctx.textAlign = 'right';
+    channels.forEach((ch, i) => { ctx.fillStyle = colors[ch] ?? colors.LABEL; ctx.fillText(EGM_CHANNEL_LABELS[ch] ?? ch, labelW - 6, top + rowPx * (i + 0.5) + 4); });
+    ctx.textAlign = 'left';
+    sampler.prepare(fromMs, toMs);
+    const n = Math.ceil((toMs - fromMs) / msPerPx);
+    const base = top + rowPx * channels.length;
+    for (let i = 0; i < n; i++) {
+        const t0 = fromMs + i * msPerPx, t1 = t0 + msPerPx, k = Math.floor(t1 / 100);
+        if (k * 100 >= t0 && k * 100 < t1) {
+            const bold = k % 10 === 0;
+            ctx.strokeStyle = bold ? colors.TICK_BOLD : colors.TICK;
+            ctx.beginPath(); ctx.moveTo(labelW + i + 0.5, base + (bold ? 2 : 8)); ctx.lineTo(labelW + i + 0.5, base + BOTTOM - 2); ctx.stroke();
+        }
+    }
+    for (const m of sim.activations(fromMs, toMs).filter(a => a.kind === 'shock' || a.kind === 'adenosine' || a.kind === 'iso' || a.kind === 'bbb')) {
+        const x = labelW + (m.tMs - fromMs) / msPerPx;
+        ctx.strokeStyle = m.kind === 'shock' ? '#ef4444' : colors.PEN;
+        ctx.beginPath(); ctx.moveTo(x + 0.5, top - TOP); ctx.lineTo(x + 0.5, base); ctx.stroke();
+        ctx.fillStyle = colors.LABEL; ctx.font = '10px -apple-system, "Segoe UI", sans-serif';
+        ctx.fillText(m.kind === 'shock' ? 'shock' : m.kind === 'iso' ? 'isoproterenol' : m.kind === 'bbb' ? (m.RB || m.LB ? `${m.RB ? 'RBBB' : ''}${m.RB && m.LB ? '+' : ''}${m.LB ? 'LBBB' : ''}` : 'bundles released') : m.kind, x + 3, top - TOP + 10);
+    }
+    ctx.lineWidth = 1.3; ctx.lineJoin = 'round';
+    channels.forEach((ch, i) => {
+        const mid = top + rowPx * (i + 0.5), g = rowPx * (LIVE_SURFACE.includes(ch) ? 0.5 : ch === 'Stim' ? 0.3 : 0.42);
+        ctx.strokeStyle = colors[ch] ?? colors.PEN;
+        ctx.beginPath();
+        for (let x = 0; x < n; x++) {
+            const v = sampler.column(ch, fromMs + x * msPerPx, fromMs + (x + 1) * msPerPx);
+            const px = labelW + x;
+            if (!x) ctx.moveTo(px, mid - v.last * g);
+            ctx.lineTo(px, mid - v.max * g); ctx.lineTo(px, mid - v.min * g); ctx.lineTo(px + 0.5, mid - v.last * g);
+        }
+        ctx.stroke();
+    });
+    if (log.length) {
+        ctx.fillStyle = colors.LABEL; ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
+        log.forEach((line, i) => ctx.fillText(line, 6, base + BOTTOM + 12 + 15 * i));
+    }
+    return { w: W, h: H };
 }
 
 export { EGM_COLORS, EGM_CHANNELS };

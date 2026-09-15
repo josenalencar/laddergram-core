@@ -16,8 +16,9 @@
  * same sequences (egm.js draws every activation with `activationDeflections`, the mapping the static figure
  * uses). From there the reader paces.
  *
- * A teaching model, not a patient: one atrium, one His, one ventricle; delays and refractory periods are
- * typical values fitted to the reading. Ablation and drugs are not modelled.
+ * A teaching model, not a patient: one atrium, one His, one ventricle (with its two bundle branches as gates,
+ * so a beat can be aberrant and a pathway's side matters); delays and refractory periods are typical values
+ * fitted to the reading. Ablation is not modelled; adenosine and isoproterenol are.
  *
  * Pure and deterministic: no DOM, no clock — the page advances the simulation with `step(dtMs)`.
  */
@@ -110,8 +111,10 @@ const AP_VENT = { leftLateral: 'preLeftLateral', septal: 'preSeptal', rightLater
  *   seeds.shown  [activation] — seeded activations late enough to be on the recording: written, not conducted
  *   node   { id, kind?: 'A'|'H'|'V', erp, prime?, auto?: { cycleMs, firstMs, jitter?, tag? } }
  *   link   { id, from, to, ante: path|null, retro: path|null, tagTo, tagFrom }
- *   path   { min, span, tau, erp, conceal?: [link id], pattern?: [bool] } — `pattern` conducts or blocks the
- *          waves that reach it in turn, repeating (a Mobitz II ratio, which no recovery time explains)
+ *   path   { min, span, tau, erp, conceal?: [link id], pattern?: [bool], extra?: { [tag]: ms } } — `pattern`
+ *          conducts or blocks the waves that reach it in turn, repeating (a Mobitz II ratio, which no recovery
+ *          time explains); `extra` adds to the delay when the wave comes from an activation with that tag (how
+ *          far a paced site is from the pathway's end)
  *   coupler { node, to, coupling, every, ownTag } — fires `node` `coupling` ms after every `every`-th activation of `to`
  */
 export function fromReading(input, ep = DEFAULT_EP) {
@@ -140,13 +143,13 @@ export function fromReading(input, ep = DEFAULT_EP) {
 
     const nodes = [], links = [], couplers = [], lasts = {}, force = [], shown = [];
     const node = (id, o = {}) => { nodes.push({ id, erp: 0, ...o }); };
-    const link = (id, from, to, o = {}) => { links.push({ id, from, to, ante: o.ante ?? null, retro: o.retro ?? null, tagTo: o.tagTo ?? null, tagFrom: o.tagFrom ?? null, ...(o.nodal ? { nodal: true } : {}) }); };
+    const link = (id, from, to, o = {}) => { links.push({ id, from, to, ante: o.ante ?? null, retro: o.retro ?? null, tagTo: o.tagTo ?? null, tagFrom: o.tagFrom ?? null, ...(o.nodal ? { nodal: true } : {}), ...(o.ipsi ? { ipsi: o.ipsi, transseptalMs: o.transseptalMs } : {}) }); };
     const byId = (id) => nodes.find(n => n.id === id) || links.find(l => l.id === id);
 
     // The chambers and the sinus node, as every reading has them.
     node('SN', { erp: 150, auto: { cycleMs: PP, firstMs: p0 - P.SACT } });
     node('A', { kind: 'A', erp: mech === 'afib' ? 80 : 200 });
-    node('H', { kind: 'H', erp: 250 });
+    node('H', { kind: 'H', erp: Math.min(250, Math.max(180, 0.6 * CL)) });
     node('V', { kind: 'V', erp: Math.min(250, Math.max(180, 0.65 * CL)) });   // shorter at the rates of a tachycardia
     const AH = PR - HV;                                                  // P onset → His: the delay of the AV path (PA + AH)
     // AV nodal refractoriness counted from the end of the last conduction: a quarter of the recovery the rhythm
@@ -154,8 +157,27 @@ export function fromReading(input, ep = DEFAULT_EP) {
     const nodalErp = (di) => Math.min(0.8 * di, Math.max(150, Math.min(250, 0.25 * di)));
     link('sa', 'SN', 'A', { ante: fixed(P.SACT), retro: fixed(P.SACT), tagTo: 'sinus' });
     link('fast', 'A', 'H', { ante: fitPath(AH, PP - AH, nodalErp(PP - AH)), retro: fitPath(110, 600, 300, { span: 60 }), tagFrom: 'fast', nodal: true });
-    link('hv', 'H', 'V', { ante: fixed(HV), retro: fixed(P.vExit), tagTo: vTag, tagFrom: 'retro' });
+    // The retrograde way into the His–Purkinje system is `vExit` from the apex (a PVC, the RV apex catheter);
+    // from the base of the right ventricle the wave has farther to go to reach it.
+    link('hv', 'H', 'V', { ante: fixed(HV), retro: { ...fixed(P.vExit), extra: { RVb: 25 } }, tagTo: vTag, tagFrom: 'retro' });
+    // The bundle branches are gates on the way down: each recovers with the rate (an H–H refractory period of
+    // 400 ms at rest — the His–Purkinje system's, long at long cycles — the right one the longer, both always
+    // inside the reading's own shortest cycle so the reading itself is never aberrant), and a beat that
+    // finds one refractory is written with that bundle's block — aberrancy. A reading with a bundle branch block
+    // has that gate closed; with both closed nothing reaches the ventricle (block below the His).
+    const minRR = Math.max(200, Math.min(CL, ...diffs(q).filter(x => x > 0)));   // never from a mis-marked beat
+    const erpRB = Math.min(400, 0.8 * minRR);
+    node('RB', { erp: 0 }); node('LB', { erp: 0 });
+    link('hrb', 'H', 'RB', { ante: vTag === 'RBBB' ? null : { ...fixed(0), erp: erpRB } });
+    link('hlb', 'H', 'LB', { ante: vTag === 'LBBB' ? null : { ...fixed(0), erp: 0.85 * erpRB } });
     const fast = byId('fast'), hv = byId('hv'), sn = byId('SN');
+    // How far a paced ventricular site is from a pathway's ventricular end, beyond what conduction over the His
+    // gives it: the apex is far from every pathway (a left lateral one most), the base of the right ventricle
+    // next to a septal one — which is what apex-versus-base pacing and parahisian pacing read (Kusumoto 9.17–9.19).
+    const AP_REACH = { septal: { RV: 25, RVb: 0, paraHis: 0 }, rightLateral: { RV: 20, RVb: 10, paraHis: 10 }, leftLateral: { RV: 40, RVb: 30, paraHis: 30 } };
+    // Coumel: a bundle branch block on the pathway's side lengthens the way round the circuit by the septum
+    const AP_IPSI = { leftLateral: 'LBBB', rightLateral: 'RBBB', septal: null };
+    const apLink = (o) => link('ap', 'A', 'V', { ...o, ...(o.retro ? { retro: { ...o.retro, extra: AP_REACH[apSite] } } : {}), ipsi: AP_IPSI[apSite], transseptalMs: 50 });
     // A ventricular beat that does not reach the atrium still penetrates the node, and leaves it refractory
     // for the next P (the compensatory pause of a PVC; the blocked P waves of VT).
     const concealedRetro = () => ({ ...fitPath(110, 600, 300, { span: 60 }), conceal: ['fast'] });
@@ -213,7 +235,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
             sn.auto.firstMs = q0 + PP;
             const ante = CL - VA - HV;
             // the node's ordinary decrement: an atrial extrastimulus lengthens the AH enough for the pathway to recover
-            fast.ante = fitPath(ante, VA + HV, Math.max(20, 0.75 * (VA + HV)));
+            fast.ante = fitPath(ante, VA + HV, Math.max(20, 0.6 * (VA + HV)), { span: 60 });
             fast.retro = null;                                           // the node is refractory behind every beat
             // A concealed pathway is entered by every atrial wave, which crawls into it for `pen` ms and dies at the
             // ventricular end, leaving it refractory: after a sinus beat the ventricle reaches it too soon, so sinus
@@ -223,10 +245,10 @@ export function fromReading(input, ep = DEFAULT_EP) {
             // (Abedin 5.6: a His-refractory PVC advances the atrium in AVRT).
             const pen = 80, diAp = CL - VA;
             const sinusPR = conductionDelay(fast.ante, 1000) + HV;
-            const erpAp = Math.min(diAp - 5, Math.max(0.5 * diAp, sinusPR - pen + 10));
+            const erpAp = Math.min(diAp - 5, Math.max(0.5 * diAp, sinusPR - pen + 20));
             // a fast pathway conducts without decrement; PJRT's slow pathway decrements, and lengthens the VA under pacing
             const apRetro = mech === 'pjrt' ? limb(VA, diAp, { erp: erpAp }) : fitPath(VA, diAp, erpAp, { span: 0 });
-            link('ap', 'A', 'V', { retro: apRetro, ante: { ...fixed(pen), conceal: [] }, tagFrom: AP_ATRIAL[apSite] });
+            apLink({ retro: apRetro, ante: { ...fixed(pen), conceal: [] }, tagFrom: AP_ATRIAL[apSite] });
             const H0 = q0 - HV, Aprev = q0 + VA - CL;
             Object.assign(lasts, { A: Aprev, H: H0 - CL, V: q0 - CL, hv: q0 - CL, fast: H0, ap: Aprev });
             shown.push({ kind: 'A', tMs: Aprev, origin: AP_ATRIAL[apSite] });
@@ -235,7 +257,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
         }
         case 'avrtAnti': {
             sn.auto.firstMs = q0 + PP;
-            link('ap', 'A', 'V', { ante: fitPath(CL - VA, VA, 0.75 * VA, { span: 0 }), tagTo: AP_VENT[apSite] });
+            apLink({ ante: fitPath(CL - VA, VA, 0.75 * VA, { span: 0 }), tagTo: AP_VENT[apSite] });
             hv.retro = fixed(P.vhMs);
             const back = Math.max(10, VA - P.vhMs);
             fast.retro = limb(back, CL - back, { span: 0.1 * back });
@@ -420,6 +442,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
         }
     }
 
+    if (Number.isFinite(lasts.H)) { lasts.hrb = lasts.H; lasts.hlb = lasts.H; lasts.RB = lasts.H; lasts.LB = lasts.H; }
     const firsts = [...nodes.map(n => n.auto?.firstMs).filter(Number.isFinite), ...force.map(f => f.tMs), 0];
     const t0Ms = Math.min(...firsts) - 5;
     return {
@@ -433,7 +456,9 @@ export function fromReading(input, ep = DEFAULT_EP) {
 
 // ─── the simulation ─────────────────────────────────────────────────────────
 
-const CHAMBER_OF_SITE = { HRA: 'A', RVa: 'V' };
+const CHAMBER_OF_SITE = { HRA: 'A', RVa: 'V', RVb: 'V' };
+export const STIM_SITES = Object.freeze(['HRA', 'RVa', 'RVb']);
+const PACED_TAG = { HRA: 'sinus', RVa: 'RV', RVb: 'RVb' };
 const KEEP_MS = 60000;
 
 /**
@@ -442,11 +467,13 @@ const KEEP_MS = 60000;
  *   now, spec,
  *   step(dtMs) → activations recorded in that step: [{ kind: 'A'|'f'|'H'|'V'|'S'|'shock', tMs, origin?, retro?, prime?, site?, n? }]
  *   runUntil(tMs), activations(fromMs, toMs), schedule(fromMs, toMs) → { activations, deflections },
- *   pace({ site: 'HRA'|'RVa', s1Ms, n1, s2Ms, s3Ms, s4Ms, sense, continuous }), cancelPacing(), pacing,
- *   cardiovert(), adenosine({ durationMs })
+ *   pace({ site: 'HRA'|'RVa'|'RVb', s1Ms, n1, s2Ms, s3Ms, s4Ms, sense, continuous, output }), cancelPacing(), pacing,
+ *   cardiovert(), adenosine({ durationMs }), isoproterenol({ durationMs }), setBundleBlock({ RB, LB }),
+ *   actions (everything asked of it, with the time), bundleBlock
  * }
+ * With `actions`, a recorded list is applied again at its times as the simulation reaches them — a replay.
  */
-export function createSim(spec, { seed = 7 } = {}) {
+export function createSim(spec, { seed = 7, actions: replayed = null } = {}) {
     const rnd = lcg(seed);
     const nodes = new Map(spec.nodes.map(n => [n.id, { ...n, auto: n.auto ? { ...n.auto } : null, last: -1e9, gen: 0, links: [] }]));
     const links = new Map(spec.links.map(l => [l.id, { ...l, busyUntil: -1e9, waves: 0 }]));
@@ -463,7 +490,10 @@ export function createSim(spec, { seed = 7 } = {}) {
 
     let queue = [], seq = 0, now = spec.t0Ms ?? 0, fCount = 0;
     let pacer = null, paceGen = 0;
-    const history = [];
+    const history = [], actions = [];
+    let iso = null;                                                  // { until, f }: isoproterenol
+    const isoF = () => (iso && now < iso.until ? iso.f : 1);
+    const pending = (replayed || []).slice().sort((a, b) => a.tMs - b.tMs);
     let collected = null;
     const push = (ev) => {
         ev.seq = seq++;
@@ -475,7 +505,7 @@ export function createSim(spec, { seed = 7 } = {}) {
     // is suppressed: its next cycle is longer by 4 % per beat it was captured, up to a third (the sinus node
     // recovery time after pacing; the pause before an atrial or junctional focus resumes — Kusumoto 4.1, 11.7).
     const cycleOf = (n) => n.auto.cycleMs * (n.auto.jitter ? 1 - n.auto.jitter + 2 * n.auto.jitter * rnd() : 1)
-        * (n.slowUntil > now ? 1.15 : 1) * (1 + 0.04 * Math.min(n.resets || 0, 8));
+        * (n.slowUntil > now ? 1.15 : 1) * (1 + 0.04 * Math.min(n.resets || 0, 8)) * isoF();
     const schedAuto = (n, t) => { n.gen++; push({ t, type: 'auto', node: n.id, gen: n.gen }); };
 
     for (const n of nodes.values()) if (n.auto && Number.isFinite(n.auto.firstMs)) schedAuto(n, n.auto.firstMs);
@@ -492,8 +522,17 @@ export function createSim(spec, { seed = 7 } = {}) {
     }
 
     function activate(n, t, viaId, tag) {
-        if (t - n.last < n.erp) return false;
-        n.last = t;
+        if (t - n.last < n.erp * isoF()) return false;
+        // the ventricle reached over the His: the bundle branches decide the shape — one refractory writes its
+        // block, neither open and the wave stops below the His
+        if (viaId === 'hv' && n.id === 'V') {
+            const H = nodes.get('H'), rb = nodes.get('RB'), lb = nodes.get('LB');
+            const open = (b) => b && H && b.last >= H.last - 0.01;
+            const r = open(rb), l = open(lb);
+            if (!r && !l && (links.get('hrb')?.ante || links.get('hlb')?.ante)) return false;
+            if (!r) tag = 'RBBB'; else if (!l) tag = 'LBBB';
+        }
+        n.last = t; n.lastTag = tag;
         if (n.auto && !n.auto.shockable) n.resets = viaId ? (n.resets || 0) + 1 : 0;   // a re-entrant driver is not suppressed, only broken
         if (n.kind) {
             const kind = n.kind === 'A' && tag === 'af' ? 'f' : n.kind;
@@ -527,10 +566,14 @@ export function createSim(spec, { seed = 7 } = {}) {
             return;
         }
         if (l.blockedUntil > t) return;                               // adenosine: the node does not conduct
+        if (l.forcedBlock) return;                                    // a bundle branch held blocked
         const DI = t - l.busyUntil;
-        if (DI < p.erp) return;
+        const f = isoF();
+        if (DI < p.erp * f) return;
         if (p.pattern && !p.pattern[l.waves++ % p.pattern.length]) return;
-        const delay = conductionDelay(p, DI);
+        let delay = conductionDelay(p, DI / f) * (1 - 0.5 * (1 - f));
+        if (p.extra && from.lastTag && p.extra[from.lastTag]) delay += p.extra[from.lastTag];
+        if (!forward && l.ipsi && from.lastTag === l.ipsi) delay += l.transseptalMs;   // Coumel's sign
         l.busyUntil = t + delay;
         if (p.conceal) {
             for (const id of p.conceal) { const k = links.get(id); if (k) k.busyUntil = Math.max(k.busyUntil, t + delay); }
@@ -559,9 +602,12 @@ export function createSim(spec, { seed = 7 } = {}) {
             if (n) activate(n, ev.t, null, null);
         } else if (ev.type === 'stim') {
             if (!pacer || ev.gen !== pacer.gen) return;
-            record({ kind: 'S', tMs: r1(ev.t), site: pacer.site });
             const chamber = nodes.get(CHAMBER_OF_SITE[pacer.site]);
-            const captured = activate(chamber, ev.t, null, pacer.site === 'HRA' ? 'sinus' : 'RV');
+            // parahisian pacing: at high output the stimulus at the base also captures the His bundle itself
+            const his = pacer.site === 'RVb' && pacer.output === 'high';
+            const captured = activate(chamber, ev.t, null, his ? 'paraHis' : PACED_TAG[pacer.site]);
+            record({ kind: 'S', tMs: r1(ev.t), site: pacer.site, captured, ...(pacer.site === 'RVb' ? { output: pacer.output } : {}) });
+            if (his && captured) push({ t: ev.t + 5, type: 'arrive', node: 'H', via: null, tag: 'paced' });
             // Overdrive termination: a re-entrant driver in the paced chamber (flutter, VT) that is captured eight
             // times running at a cycle well under its own is broken — the circuit is invaded from both ends
             // (Kusumoto 14.6; Abedin 5.1). An automatic focus is only suppressed, and fires again after its cycle.
@@ -580,11 +626,21 @@ export function createSim(spec, { seed = 7 } = {}) {
         const until = now + Math.max(0, dtMs);
         const out = [];
         collected = out;
-        while (queue.length && queue[0].t <= until) {
-            const ev = queue.shift();
-            now = ev.t;
-            handle(ev);
+        const runTo = (tEnd) => {
+            while (queue.length && queue[0].t <= tEnd) {
+                const ev = queue.shift();
+                now = ev.t;
+                handle(ev);
+            }
+        };
+        // a replay: what was asked of the heart, at the moment it was asked
+        while (pending.length && pending[0].tMs <= until) {
+            const a = pending.shift();
+            runTo(a.tMs);
+            now = Math.max(now, a.tMs);
+            if (typeof api[a.type] === 'function') api[a.type](...(a.args || []));
         }
+        runTo(until);
         now = until;
         collected = null;
         if (history.length && history[0].tMs < now - KEEP_MS) {
@@ -594,17 +650,20 @@ export function createSim(spec, { seed = 7 } = {}) {
         return out;
     }
 
-    function cancelPacing() { pacer = null; for (const n of nodes.values()) n.captures = 0; }
+    const note = (type, ...args) => actions.push({ tMs: r1(now), type, ...(args.length ? { args } : {}) });
+    function cancelPacing() { note('cancelPacing'); pacer = null; for (const n of nodes.values()) n.captures = 0; }
 
     /**
      * The stimulator: S1 × n1 then S2, S3, S4 (each measured from the stimulus before it), from the HRA or the
      * RV apex. With `sense`, the first stimulus comes S1 after the next beat sensed at that site; `continuous`
      * paces at S1 until stopped.
      */
-    function pace({ site = 'HRA', s1Ms = 600, n1 = 8, s2Ms = null, s3Ms = null, s4Ms = null, sense = true, continuous = false } = {}) {
-        if (!CHAMBER_OF_SITE[site] || !(s1Ms >= 150)) throw new Error('pace: a site (HRA or RVa) and an S1 of at least 150 ms');
+    function pace(o = {}) {
+        const { site = 'HRA', s1Ms = 600, n1 = 8, s2Ms = null, s3Ms = null, s4Ms = null, sense = true, continuous = false, output = 'low' } = o;
+        if (!CHAMBER_OF_SITE[site] || !(s1Ms >= 150)) throw new Error('pace: a site (HRA, RVa or RVb) and an S1 of at least 150 ms');
+        note('pace', { site, s1Ms, n1, s2Ms, s3Ms, s4Ms, sense, continuous, output });
         const extra = [s2Ms, s3Ms, s4Ms].filter(v => Number.isFinite(v) && v > 0);
-        pacer = { site, s1Ms, continuous: !!continuous, gen: ++paceGen, waiting: !!sense, i: 0,
+        pacer = { site, s1Ms, continuous: !!continuous, gen: ++paceGen, waiting: !!sense, i: 0, output: output === 'high' ? 'high' : 'low',
                   intervals: [...Array(Math.max(0, Math.round(n1) - 1)).fill(s1Ms), ...extra] };
         if (!sense) push({ t: now + 10, type: 'stim', gen: pacer.gen });
     }
@@ -617,6 +676,7 @@ export function createSim(spec, { seed = 7 } = {}) {
      */
     function adenosine({ durationMs = 6000 } = {}) {
         const t = now;
+        note('adenosine', { durationMs });
         record({ kind: 'adenosine', tMs: r1(t) });
         for (const l of links.values()) if (l.nodal) l.blockedUntil = t + durationMs;
         const sn = nodes.get('SN');
@@ -629,8 +689,31 @@ export function createSim(spec, { seed = 7 } = {}) {
      * fibrillation, flutter, ventricular tachycardia (`shockable`); an automatic focus fires again after its
      * cycle, and the sinus node takes over after its own. A shocked driver stays silent: no later beat restarts it.
      */
+    /**
+     * Isoproterenol: every refractory period and every automatic cycle shorter by the factor (0.8: a fifth), every
+     * conduction delay a little shorter — the sinus rate rises, a focus fires faster, and a tachycardia that would
+     * not start (an extrastimulus meeting a refractory pathway, a node too slow to let a pathway recover) starts.
+     */
+    function isoproterenol({ durationMs = 60000, factor = 0.8 } = {}) {
+        note('isoproterenol', { durationMs, factor });
+        record({ kind: 'iso', tMs: r1(now) });
+        iso = { until: now + durationMs, f: Math.min(1, Math.max(0.5, factor)) };
+        // the sinus node and every focus take the new rate from their next beat
+        for (const n of nodes.values()) if (n.auto && Number.isFinite(n.auto.cycleMs) && !n.silenced && n.last > -1e8) schedAuto(n, Math.max(now + 1, n.last + cycleOf(n)));
+    }
+
+    /** Hold a bundle branch blocked (or release it): aberrancy on demand, and Coumel's sign in AVRT. */
+    function setBundleBlock({ RB = null, LB = null } = {}) {
+        note('setBundleBlock', { RB, LB });
+        record({ kind: 'bbb', tMs: r1(now), RB: !!RB, LB: !!LB });
+        const hrb = links.get('hrb'), hlb = links.get('hlb');
+        if (hrb) hrb.forcedBlock = !!RB;
+        if (hlb) hlb.forcedBlock = !!LB;
+    }
+
     function cardiovert() {
         const t = now;
+        note('cardiovert');
         record({ kind: 'shock', tMs: r1(t) });
         queue = queue.filter(e => e.type === 'auto');
         pacer = null;
@@ -643,10 +726,13 @@ export function createSim(spec, { seed = 7 } = {}) {
         for (const l of links.values()) l.busyUntil = t;
     }
 
-    return {
+    const api = {
         spec,
         get now() { return now; },
-        get pacing() { return pacer ? { site: pacer.site, waiting: pacer.waiting, continuous: pacer.continuous } : null; },
+        get pacing() { return pacer ? { site: pacer.site, waiting: pacer.waiting, continuous: pacer.continuous, output: pacer.output } : null; },
+        get actions() { return actions.slice(); },
+        get bundleBlock() { return { RB: !!links.get('hrb')?.forcedBlock, LB: !!links.get('hlb')?.forcedBlock }; },
+        get isoUntil() { return iso && now < iso.until ? iso.until : null; },
         step,
         runUntil(tMs) { if (tMs > now) step(tMs - now); return history; },
         activations(fromMs = -Infinity, toMs = Infinity) { return history.filter(a => a.tMs >= fromMs && a.tMs <= toMs); },
@@ -655,6 +741,7 @@ export function createSim(spec, { seed = 7 } = {}) {
             const acts = history.filter(a => a.tMs >= fromMs - 200 && a.tMs <= toMs);
             return { activations: acts, deflections: acts.flatMap(a => activationDeflections(a, spec.P)).sort((a, b) => a.tMs - b.tMs) };
         },
-        pace, cancelPacing, cardiovert, adenosine,
+        pace, cancelPacing, cardiovert, adenosine, isoproterenol, setBundleBlock,
     };
+    return api;
 }

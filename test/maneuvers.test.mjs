@@ -29,7 +29,8 @@ const R = {
     flutter: reading('flutter21', 'flutter', { fWaveMs: 210, fPhaseMs: 100 }), af: reading('af', 'afib'),
     vt: reading('vtDissociation', 'vt'),
 };
-const heart = (input) => createSim(fromReading(input));
+R.avrtSeptal = { ...R.avrt, ep: { apSite: 'septal' } };
+const heart = (input) => createSim(fromReading(input, input.ep));
 const tcl = (s, t0, t1) => { const V = s.activations(t0, t1).filter(a => a.kind === 'V'); const rr = V.slice(1).map((v, i) => v.tMs - V[i].tMs); return rr.length ? rr.reduce((a, b) => a + b) / rr.length : null; };
 const isA = (a) => a.kind === 'A';
 
@@ -56,7 +57,8 @@ function entrain(input, { site = 'RVa', n = 10, delta = 30 } = {}) {
     const duringA = paced.length, captured = paced.filter(a => a.origin === 'fast').length;
     const afterA = acts.filter(a => isA(a) && a.tMs > last.tMs - 5).map(a => a.tMs);
     const afterV = acts.filter(a => a.kind === 'V' && a.tMs > last.tMs + 1).map(a => a.tMs);
-    const response = acts.filter(a => (isA(a) || a.kind === 'V') && a.tMs >= last.tMs - 1).slice(0, 4).map(a => a.kind).join('-');
+    // the response on cessation: from the last paced V on (an A landing on the stimulus is the previous beat's)
+    const response = acts.filter(a => (isA(a) && a.tMs > last.tMs) || (a.kind === 'V' && a.tMs >= last.tMs - 0.01)).slice(0, 4).map(a => a.kind).join('-');
     const Hpace = acts.find(a => a.kind === 'H' && a.tMs > S[S.length - 2].tMs && a.tMs < last.tMs);
     const Apace = acts.find(a => isA(a) && a.tMs > S[S.length - 2].tMs && a.tMs < last.tMs);
     // after atrial pacing: the last stimulus's own conduction (its H, then V), and the A that follows that V
@@ -74,7 +76,7 @@ function entrain(input, { site = 'RVa', n = 10, delta = 30 } = {}) {
 const resumesAt = (r) => r.resumes != null && Math.abs(r.resumes - r.CL) <= 5;
 
 /** One PVC from the RV apex coupled `dc` ms from the moment the His fires; the shift of the next A against the cycle. */
-function pvcNearHis(input, dc) {
+function pvcNearHis(input, dc, site = 'RVa') {
     const s0 = heart(input);
     s0.runUntil(3000);
     const CL = tcl(s0, 1000, 3000);
@@ -85,7 +87,7 @@ function pvcNearHis(input, dc) {
     const c = Math.round(hAfterV + dc);
     const s = heart(input);
     s.runUntil(3000);
-    s.pace({ site: 'RVa', s1Ms: c, n1: 1, sense: true });
+    s.pace({ site, s1Ms: c, n1: 1, sense: true });
     s.runUntil(6000);
     const S = s.activations(3000, 6000).filter(a => a.kind === 'S')[0];
     const prevA = s.activations(S.tMs - CL - 50, S.tMs).filter(isA).pop();
@@ -148,9 +150,14 @@ section('atrial overdrive pacing (Abedin Table 5.2)');
 
 section('a PVC delivered when the His is refractory (Kusumoto 5.15–5.16; Abedin 5.16, 5.23)');
 {
-    const shifts = (k) => [-20, 0, 10, 20].map(dc => pvcNearHis(R[k], dc).shift);
-    ok('orthodromic AVRT: the next atrial activation is advanced, at every coupling around the His', shifts('avrt').every(x => x != null && x <= -15), `${shifts('avrt')}`);
-    ok('PJRT: advanced too', shifts('pjrt').every(x => x != null && x <= -10), `${shifts('pjrt')}`);
+    const shifts = (k, dcs = [-20, 0, 10, 20], site) => dcs.map(dc => pvcNearHis(R[k], dc, site).shift);
+    // from the RV apex a septal pathway is near enough: a PVC on the His pulls the atrium in; a left lateral one
+    // is far, so only a PVC ahead of the His does — why the base, or the left ventricle, is paced for left-sided
+    // pathways (Kusumoto 9.17–9.19)
+    ok('orthodromic AVRT, septal pathway: the next atrial activation is advanced by a PVC on the His (−20, 0, +10 ms)', shifts('avrtSeptal', [-20, 0, 10]).every(x => x != null && x <= -10), `${shifts('avrtSeptal')}`);
+    ok('orthodromic AVRT, septal pathway: the same PVC from the RV base advances it more than from the apex (differential pacing)', shifts('avrtSeptal', [0], 'RVb')[0] < shifts('avrtSeptal', [0])[0] - 15, `${shifts('avrtSeptal', [0], 'RVb')} vs ${shifts('avrtSeptal', [0])}`);
+    ok('orthodromic AVRT, left lateral pathway: advanced by a PVC ahead of the His, not by one on it from the apex — the pathway is far', shifts('avrt', [-20]).every(x => x != null && x <= -15) && shifts('avrt', [0, 20]).every(x => x != null && x > -15 && x <= 15), `${shifts('avrt')}`);
+    ok('PJRT: advanced at or before the His; a late one is delayed instead — post-excitation over the decremental pathway (Abedin 5.6)', shifts('pjrt', [-20, 0]).every(x => x != null && x <= -5) && shifts('pjrt', [20]).every(x => x != null && x > 0), `${shifts('pjrt')}`);
     for (const k of ['avnrt', 'avnrtAtyp', 'jt', 'at']) ok(`${k}: the atrium is not reset`, shifts(k).every(x => x != null && Math.abs(x) < 1), `${shifts(k)}`);
     const early = (k, dcs) => dcs.map(dc => ({ dc, ...pvcNearHis(R[k], dc) }));
     ok('typical AVNRT: an earlier PVC reaching the circuit only resets it (with VA 35 ms the fast pathway has always recovered) — never terminated',

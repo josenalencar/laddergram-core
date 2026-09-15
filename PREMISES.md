@@ -279,6 +279,19 @@ submission): every one of them was an error the previous rule produced.
   broken; a re-entrant driver (flutter, VT) is broken by eight captures at a cycle under 92 % of its own. The
   ventricle's refractory period shortens with the rate (65 % of the cycle, 180–250 ms), so a PVC can be coupled
   early enough to be blocked in a pathway or to catch the node refractory — the terminations of Kusumoto 5.17–5.19.
+- **The bundle branches are gates** on the way from the His to the ventricle: each has an H–H refractory period
+  (400 ms at rest, the right one the longer, always inside the reading's own shortest cycle so the reading is never
+  aberrant), a beat that finds one closed is written with that block, and a bundle can be held blocked — which
+  lengthens the way round an orthodromic circuit by the septum when the pathway is on that side (Coumel's sign,
+  +50 ms). **Paced sites are placed**: from the RV apex the His–Purkinje system is entered in `vExit`, from the base
+  25 ms later; a pathway's ventricular end is 25–40 ms from the apex and 0–30 ms from the base by its site — what
+  parahisian pacing (high output captures the His itself) and apex-versus-base pacing read. Isoproterenol shortens
+  every refractory period and cycle by a fifth for a minute. Every request to the heart is logged with its time, so
+  an episode replays exactly.
+- **The maneuvers are read back** (epmaneuvers.js) the way the laboratory writes them: each train, PVC, drug and
+  shock becomes its measurements (S–A, PPI − TCL, SA − VA, ΔHA, the response on cessation, ΔS–A against ΔS–H) and
+  the conclusion the textbooks draw from them, with the known mimics named (a junctional tachycardia answers
+  ventricular entrainment like AVNRT). The baseline study runs in an instant on a fresh heart from the same reading.
 - A teaching model, not a patient: one atrium, one His, one ventricle; no ablation, no drugs, no atrial or
   ventricular fibrillation induced by pacing.
 - **The recorder is in colour on black, as a lab screen**: surface II (white) and V1 (green) written from the

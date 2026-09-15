@@ -19,7 +19,14 @@ The maneuvers, as the stimulator offers them (`pace({ site, s1Ms, n1, s2Ms, s3Ms
 | ventricular extrastimulus (S2) | RV apex, S1 × 8 then S2 |
 | PVC when the His is refractory | RV apex, S1 × 1 with `sense`: one stimulus coupled so it lands as the His fires |
 | adenosine | the AV node (its pathways and the lower common pathway) blocked both ways for 6 s; the sinus node slowed |
+| isoproterenol | every refractory period and automatic cycle shorter by a fifth for a minute, conduction a little faster |
+| parahisian pacing | RV base, `output: 'high'` captures the His bundle too, `'low'` the myocardium only; S–A and S–H compared |
+| apex vs base pacing | the same stimulus from `RVa` and `RVb`: a septal pathway is nearer the base, the His–Purkinje entry nearer the apex |
+| bundle branch block | `setBundleBlock({ RB, LB })` holds a bundle; an early beat can also find one refractory (aberrancy, H–H ERP 400 ms at rest, 80 % of the reading's shortest cycle) |
 | synchronised shock | every node and path depolarised; re-entrant drivers silenced |
+
+Every one of these is read back by `interpretLog` (epmaneuvers.js) as the laboratory would write it — the measurements and the
+conclusion — and the baseline study (`scanExtrastimulus`, `scanDrive`) runs in an instant on a fresh heart from the same reading.
 
 Measurements used below (Abedin 5.5, definitions): **TCL** the tachycardia cycle; **PPI** last stimulus → next
 activation of the paced chamber; **SA** last stimulus → next atrial activation; **VA** QRS onset → atrial
@@ -84,7 +91,9 @@ V-A-A-V: two atrial activations before the next V, an atrial tachycardia).
 | PVC when the His is refractory | advances the next A with the same sequence, or terminates without an A — proof of the pathway (Kusumoto 5.16; Abedin 5.6) | A advanced 25–90 ms at couplings from 40 ms before to 20 ms after the His | maneuvers |
 | earlier PVC | blocked in the pathway: terminates without an A (Kusumoto 5.18; Abedin 5.6) | terminated without an A at couplings 50–80 ms before the His | maneuvers |
 | ventricular pacing, retrograde sequence | eccentric, the same as in tachycardia (Kusumoto 9.16; Abedin 5.22) | left lateral / posteroseptal / right free-wall by the setting | epsim |
-| ipsilateral bundle branch block | VA and TCL lengthen ≥ 30 ms — Coumel's sign (Kusumoto 9.21) | *not modelled* (one ventricle) | — |
+| ipsilateral bundle branch block | VA and TCL lengthen ≥ 30 ms — Coumel's sign (Kusumoto 9.21) | left lateral pathway with LBBB: VA 140 → 190, TCL 340 → 390; RBBB or a septal pathway: unchanged | epmaneuvers |
+| parahisian pacing | S–A unchanged on losing His capture with a septal pathway; lengthens with S–H over the node (Kusumoto 9.18) | septal pathway ΔS–A 0 / ΔS–H +60; no pathway +60 / +60; a left lateral pathway also reads as a pathway pattern (a limit of the model: no left ventricle) | epmaneuvers |
+| apex vs base pacing | a septal pathway is reached sooner from the base (Kusumoto 9.17) | the His-synchronous PVC from the base advances the A more than from the apex; a left lateral pathway is far from both | maneuvers, epmaneuvers |
 | adenosine | terminates in the node, ending on an A | terminates; the last activation before the pause is an A | maneuvers |
 | shock | terminates | sinus | epsim |
 
@@ -161,8 +170,9 @@ The compensatory pause of a PVC and the P blocked behind an H′ are concealed c
 
 ## Not modelled — say so, do not fake it
 
-Termination of typical AVNRT by a PVC (see above); parahisian pacing and differential (apex vs base) RV pacing (one ventricle); Coumel's sign (no bundle
-branches in the network); a PAC placed at the ostium when the atrium has fired (one atrium); entrainment
+Termination of typical AVNRT by a PVC (see above); a left ventricle of its own (so parahisian and apex-vs-base
+pacing read the septal region, and a left lateral pathway is "far" from every right ventricular site rather
+than reachable from the LV); a PAC placed at the ostium when the atrium has fired (one atrium); entrainment
 mapping of flutter or VT by site; the two-for-one response; retrograde Wenckebach in the node; VT
-acceleration or degeneration under pacing; triggered activity (adenosine-sensitive AT); isoproterenol;
-retrograde conduction surviving infranodal block; 2:1 block below an AVNRT circuit.
+acceleration or degeneration under pacing; triggered activity (adenosine-sensitive AT); retrograde conduction
+surviving infranodal block; 2:1 block below an AVNRT circuit.
