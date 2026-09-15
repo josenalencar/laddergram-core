@@ -202,6 +202,13 @@ export function plausibility(beats = [], atrial = [], params = null) {
     if (m.relation !== 'none' && m.nP >= 2 && m.PP && (m.PP < 160 || m.PP > 350)) caution(['flutter'], `P–P ${m.PP} ms: flutter waves come every 160–350 ms`);
     if (m.relation !== 'none' && m.nP < 2) caution(['flutter'], 'mark at least two F waves');
     if (m.dissociated && m.PP && m.RR && m.PP >= m.RR) caution(['avb3'], 'the ventricles are not slower than the atria');
+    // the escape of complete block: junctional 40–60 /min with a narrow QRS, ventricular 20–40 /min and wide
+    if (m.relation === 'dissociated' && m.rate) {
+        if (!m.wide && m.rate > 60) caution(['avb3'], `narrow QRS at ${m.rate}/min: faster than a junctional escape (40–60 /min) — an accelerated junctional rhythm with AV dissociation, rather than block?`);
+        if (m.wide && m.rate > 50) caution(['avb3'], `wide QRS at ${m.rate}/min: faster than a ventricular escape (20–40 /min) — an accelerated idioventricular rhythm or VT with AV dissociation?`);
+    }
+    // a focal atrial tachycardia is under 240 /min; faster regular atrial activity is flutter
+    if (m.relation !== 'none' && m.nP >= 3 && m.PP && m.PP < 250 && m.ppCV != null && m.ppCV <= 0.1) caution(['at'], `atrial rate ${Math.round(60000 / m.PP)}/min: a focal atrial tachycardia is under 240 /min — regular atrial activity this fast is flutter`);
 
     return { rhythm: m, verdicts: v, summary: rhythmSummary(m) };
 }

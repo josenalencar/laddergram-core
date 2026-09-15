@@ -33,7 +33,7 @@ const acts = (s, kind) => s.activations.filter(a => a.kind === kind);
 /** The atrial deflections one activation wrote, by channel. */
 const atrialOf = (s, a) => {
     const out = {};
-    for (const d of s.deflections) if (d.kind === 'A' && d.tMs >= a.tMs - 1 && d.tMs <= a.tMs + 120 && (out[d.ch] == null)) out[d.ch] = d.tMs;
+    for (const d of s.deflections) if (d.kind === 'A' && d.tMs >= a.tMs - 15 && d.tMs <= a.tMs + 120 && (out[d.ch] == null)) out[d.ch] = d.tMs;
     return out;
 };
 const earliest = (seq, chans) => chans.reduce((best, ch) => (seq[ch] < seq[best] ? ch : best), chans[0]);
@@ -46,7 +46,7 @@ section('sinus rhythm: high RA first, the septum PA later, the coronary sinus pr
     const A = acts(s, 'A');
     ok('one atrial activation per P, all from the sinus node', A.length === figureMarkers(makeExample('sinus')).atrial.length && A.every(a => a.origin === 'sinus'));
     const a = A[1], seq = atrialOf(s, a);
-    ok('HRA at the P onset', seq.HRA === a.tMs, `HRA ${seq.HRA} vs P ${a.tMs}`);
+    ok('the HRA fires 10 ms before the P is inscribed (Kusumoto ch. 2)', seq.HRA === a.tMs - 10, `HRA ${seq.HRA} vs P ${a.tMs}`);
     ok('the His catheter sees the atrium PA after the P onset', seq.His === a.tMs + DEFAULT_PARAMS.PA);
     ok('CS 9-10 → CS 1-2, 10 ms apart', CS.every((ch, i) => i === 0 || seq[ch] - seq[CS[i - 1]] === 10) && seq.CS910 === seq.His + 10);
     ok('HRA is the earliest atrial channel', earliest(seq, ATRIAL_CH) === 'HRA');
@@ -62,7 +62,7 @@ section('sinus rhythm: high RA first, the septum PA later, the coronary sinus pr
     ok('a changed PA moves the His and CS atrial deflections', (() => {
         const s2 = reading('sinus', 'avnodal', { PA: 50 }).s;
         const q = atrialOf(s2, acts(s2, 'A')[1]);
-        return q.His === q.HRA + 50 && q.CS910 === q.HRA + 60;
+        return q.His === q.HRA + 60 && q.CS910 === q.HRA + 70;
     })());
 }
 
@@ -86,6 +86,7 @@ section('atypical AVNRT: retrograde up the slow pathway — the coronary sinus o
     ok('long VA → retrograde over the slow pathway', retro.length > 5 && retro.every(a => a.origin === 'slow'));
     const seq = atrialOf(s, retro[2]);
     ok('CS 9-10 is the earliest atrial channel', earliest(seq, ATRIAL_CH) === 'CS910');
+    ok('the His atrium follows the ostium by 30 ms (Abedin 5.5: 30–60 ms)', seq.His === seq.CS910 + 30);
 }
 
 section('orthodromic AVRT: retrograde up the accessory pathway — eccentric');
@@ -218,6 +219,28 @@ section('a strip whose time axis starts before zero');
     ok('the samples cover the window asked for, from its own start', early.n === 2000 && early.t0Ms === -1000 && from0.t0Ms === 0);
     ok('a deflection before zero is on the signal that starts before zero', peak(early.channels.HRA, 480, 560) > 0.3);
     ok('and nowhere on one that starts at zero', peak(from0.channels.HRA, 0, 1000) < 0.1);
+}
+
+section('where an atrial focus fires (a setting), and the order the coronary sinus is listed in');
+{
+    const first = (site) => { const { s } = reading('svtShortRP', 'at', {}, { ep: { ...DEFAULT_EP, atSite: site } }); const a = acts(s, 'A')[2]; return { origin: a.origin, seq: atrialOf(s, a) }; };
+    ok('a high right atrial (cristal) focus: the HRA first, like sinus', (() => { const r = first('highRA'); return r.origin === 'highRA' && earliest(r.seq, ATRIAL_CH) === 'HRA'; })());
+    ok('a focus at the coronary sinus ostium: CS 9-10 first, the His atrium 30 ms later', (() => { const r = first('csOs'); return earliest(r.seq, ATRIAL_CH) === 'CS910' && r.seq.His === r.seq.CS910 + 30; })());
+    ok('a left atrial focus: CS 1-2 first, the HRA last', (() => { const r = first('leftAtrium'); return earliest(r.seq, ATRIAL_CH) === 'CS12' && r.seq.HRA > r.seq.His; })());
+    ok('a septal focus: the His atrium first, the ostium within 5 ms', (() => { const r = first('septal'); return earliest(r.seq, ATRIAL_CH) === 'His' && r.seq.CS910 === r.seq.His + 5; })());
+    ok('the default is the high right atrium', cleanEp({}).atSite === 'highRA' && cleanEp({ atSite: 'nowhere' }).atSite === 'highRA');
+    ok('the coronary sinus is listed proximal first, or distal first as some labs do', JSON.stringify(channelsOf({ ...DEFAULT_EP, csDistalFirst: true })) === JSON.stringify(['HRA', 'His', 'CS12', 'CS34', 'CS56', 'CS78', 'CS910', 'RVa'])
+        && JSON.stringify(channelsOf({ ...DEFAULT_EP, csDistalFirst: true, catheters: ['CS910', 'CS12', 'RVa'] })) === JSON.stringify(['CS12', 'CS910', 'RVa']));
+}
+
+section('a posteroseptal pathway is near-concentric; typical flutter climbs the septum');
+{
+    const { s } = reading('avrt', 'avrt', { VA: 140 }, { ep: { ...DEFAULT_EP, apSite: 'septal' } });
+    const q = atrialOf(s, acts(s, 'A').find(a => a.retro));
+    ok('posteroseptal: the ostium first, the His atrium 20 ms later, the distal coronary sinus and the HRA late', earliest(q, ATRIAL_CH) === 'CS910' && q.His === q.CS910 + 20 && q.CS12 > q.His && q.HRA > q.His);
+    const fl = reading('flutter21', 'flutter', { fWaveMs: 210, fPhaseMs: 100 }).s;
+    const f = atrialOf(fl, acts(fl, 'A')[5]);
+    ok('flutter: the ostium, then the His region 30 ms up the septum, the HRA last at 100 ms', f.His === f.CS910 + 30 && f.HRA === f.CS910 + 100 && f.CS12 === f.CS910 + 40);
 }
 
 console.log(`\n${pass} ok, ${fail} fail`);

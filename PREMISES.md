@@ -166,17 +166,31 @@ submission): every one of them was an error the previous rule produced.
   and ventricle and less atrium); the coronary sinus decapolar as five bipoles, **CS 9-10 at the ostium to
   CS 1-2 distally**; the RV apex. They are listed in that order, as an EP system lists them.
 - Atrial activation, ms after the ladder's atrial line (HisA = the atrial deflection on the His catheter; PA is
-  the reading's own):
+  the reading's own). Sources: Kusumoto, *Understanding Intracardiac EGMs and ECGs* (2010) ch. 2, 5, 9–12;
+  Abedin, *Essential Cardiac Electrophysiology* (2013) §5.2, 5.5, 5.6; Josephson ch. 2 and 8. Typical values,
+  rounded: a teaching model, not a patient.
 
   | origin | HRA | HisA | CS 9-10 | 7-8 | 5-6 | 3-4 | CS 1-2 |
   |---|---|---|---|---|---|---|---|
-  | sinus P, atrial focus, HRA pacing | 0 | PA | PA+10 | PA+20 | PA+30 | PA+40 | PA+50 |
+  | sinus P, high right atrial (cristal) focus, HRA pacing | −10 | PA | PA+10 | PA+20 | PA+30 | PA+40 | PA+50 |
   | retrograde over the fast pathway (concentric) | 35 | 0 | 10 | 20 | 30 | 40 | 50 |
-  | retrograde over the slow pathway | 45 | 15 | 0 | 10 | 20 | 30 | 40 |
-  | accessory pathway, left lateral (eccentric) | 70 | 50 | 40 | 30 | 20 | 10 | 0 |
-  | accessory pathway, posteroseptal | 35 | 5 | 0 | 10 | 20 | 30 | 40 |
+  | retrograde over the slow pathway; a focus at the ostium | 55 | 30 | 0 | 10 | 20 | 30 | 40 |
+  | accessory pathway, left lateral (eccentric); a left atrial focus | 70 | 50 | 40 | 30 | 20 | 10 | 0 |
+  | accessory pathway, posteroseptal | 45 | 20 | 0 | 10 | 20 | 30 | 40 |
+  | a septal atrial focus | 40 | 0 | 5 | 15 | 25 | 35 | 45 |
   | accessory pathway, right free wall | 0 | 25 | 35 | 45 | 55 | 65 | 75 |
-  | typical flutter (up the septum) | 100 | 10 | 0 | 10 | 20 | 30 | 40 |
+  | typical flutter (counter-clockwise) | 100 | 30 | 0 | 10 | 20 | 30 | 40 |
+
+  The high right atrium fires before the surface P is inscribed (too little tissue yet for the ECG), which is why
+  a sinus beat's HRA is at −10. Retrograde over the fast pathway the His atrium leads and the ostium follows
+  within 10 ms — which is why the ostium is often the first atrial deflection *seen* in typical AVNRT, the His
+  atrium being buried in the ventricular one. Retrograde over the slow pathway (slow–slow and fast–slow AVNRT)
+  the ostium leads the His atrium by 30–60 ms. In typical flutter the wave leaves the cavotricuspid isthmus into
+  the ostium, climbs the septum to the His region and crosses the left atrium proximal to distal while the
+  lateral right atrial wall is the last to be activated, top to bottom.
+
+  Where an atrial focus fires is a setting (high right atrium / crista, the ostium, the left atrium, the septum);
+  the P-wave morphology the tracing shows is the reader's clue, the EP view cannot know it.
 
   A retrograde P goes up the pathway the ladder draws it up: an `ap` line is the pathway (its site is a
   setting — PJRT defaults to posteroseptal, every other reading to left lateral), an `av-retro` line drawn slow

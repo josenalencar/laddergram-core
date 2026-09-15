@@ -25,16 +25,23 @@ export function liveChannels(ep) {
 
 const G = (t, c, s, a) => a * Math.exp(-0.5 * ((t - c) / s) ** 2);
 
-/** QRS shapes per lead: [ms after onset, σ, mV]. */
+/**
+ * QRS shapes per lead: [ms after onset, σ, mV]. A pre-excited beat takes the shape of the pathway's side: a left
+ * lateral pathway pre-excites the left ventricle (RBBB-like, positive in V1, the delta wave negative laterally
+ * — here II stays positive), a posteroseptal one gives negative delta waves in the inferior leads with an early
+ * transition, a right free-wall one an LBBB-like QRS, negative in V1 (Abedin 5.6; Kusumoto ch. 9).
+ */
 const QRS_SHAPES = {
     normal: { II: [[12, 5, -0.1], [38, 9, 1.1], [62, 8, -0.25]], V1: [[18, 6, 0.25], [48, 12, -0.9]] },
     RBBB: { II: [[12, 5, -0.08], [36, 9, 0.9], [60, 9, -0.2], [100, 16, -0.35]], V1: [[16, 6, 0.3], [40, 9, -0.35], [92, 15, 0.8]] },
     LBBB: { II: [[30, 14, 0.7], [95, 20, 0.6]], V1: [[20, 8, 0.1], [70, 25, -1.1]] },
     RV: { II: [[40, 16, 0.9], [110, 22, 0.5]], V1: [[70, 28, -1.2]] },
     LV: { II: [[40, 16, -0.8], [110, 22, -0.3]], V1: [[50, 20, 1.2], [120, 22, 0.4]] },
-    pre: { II: [[25, 16, 0.5], [70, 14, 0.9], [105, 14, -0.2]], V1: [[30, 16, 0.4], [80, 16, 0.7]] },
+    preLeftLateral: { II: [[25, 16, 0.5], [70, 14, 0.9], [105, 14, -0.2]], V1: [[30, 16, 0.4], [80, 16, 0.7]] },
+    preSeptal: { II: [[25, 16, -0.45], [70, 14, -0.6], [110, 14, 0.15]], V1: [[30, 16, 0.3], [80, 16, 0.5]] },
+    preRightLateral: { II: [[25, 16, 0.4], [70, 14, 0.8], [110, 14, 0.2]], V1: [[30, 16, -0.4], [80, 18, -0.8]] },
 };
-const shapeOf = (origin) => (origin?.startsWith('pre') ? 'pre' : QRS_SHAPES[origin] ? origin : 'normal');
+const shapeOf = (origin) => (QRS_SHAPES[origin] ? origin : origin?.startsWith('pre') ? 'preLeftLateral' : 'normal');
 
 /** The surface lead (II or V1) at time t, from the activations around it (mV). */
 export function surfaceAt(acts, lead, tMs) {
@@ -43,8 +50,13 @@ export function surfaceAt(acts, lead, tMs) {
         const dt = tMs - a.tMs;
         if (dt < -5 || dt > 700) continue;
         if (a.kind === 'A') {
+            // the P wave by where the atrium is activated from: upright in II from the sinus node or a high
+            // right atrial focus; inverted in II when the atrium is entered from below (the node, a septal
+            // pathway or focus, the ostium); a left atrial focus or pathway writes a low P in II and an upright
+            // one in V1 (Abedin 5.2, Table 11.1 of Kusumoto)
             if (a.origin === 'flutter') v += lead === 'II' ? G(dt, 90, 38, -0.16) + G(dt, 175, 16, 0.1) : G(dt, 60, 30, 0.08);
-            else if (a.origin === 'sinus') v += lead === 'II' ? G(dt, 45, 18, 0.12) : G(dt, 30, 12, 0.07) + G(dt, 65, 14, -0.05);
+            else if (a.origin === 'sinus' || a.origin === 'highRA' || a.origin === 'apRightLateral') v += lead === 'II' ? G(dt, 45, 18, 0.12) : G(dt, 30, 12, 0.07) + G(dt, 65, 14, -0.05);
+            else if (a.origin === 'leftAtrium' || a.origin === 'apLeftLateral') v += lead === 'II' ? G(dt, 50, 22, 0.05) : G(dt, 45, 18, 0.12);
             else v += lead === 'II' ? G(dt, 45, 20, -0.15) : G(dt, 40, 16, 0.09);
         } else if (a.kind === 'f') {
             v += G(dt, 10, 12, lead === 'V1' ? 0.06 : 0.025);

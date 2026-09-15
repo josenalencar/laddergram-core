@@ -45,6 +45,12 @@ const HIS = ['His', 'Hisp', 'Hisd'];
 export const EP_SPEEDS = Object.freeze([100, 200, 300]);
 /** Where an accessory pathway inserts. 'auto': septal for PJRT (a posteroseptal pathway), left lateral otherwise. */
 export const AP_SITES = Object.freeze(['auto', 'leftLateral', 'septal', 'rightLateral']);
+/**
+ * Where an atrial focus fires (an atrial tachycardia, a PAC): the crista terminalis / high right atrium (the
+ * commonest right atrial site, activated like a sinus beat), the coronary sinus ostium, the left atrium (a
+ * pulmonary vein or the lateral wall — the distal coronary sinus first), or the interatrial septum.
+ */
+export const AT_SITES = Object.freeze(['highRA', 'csOs', 'leftAtrium', 'septal']);
 /** Where a ventricular focus (PVC, VT, ventricular escape) arises. */
 export const V_ORIGINS = Object.freeze(['RV', 'LV']);
 /** The six orders of the three blocks of a frame, top to bottom. */
@@ -55,7 +61,7 @@ export const BLOCK_ORDERS = Object.freeze([
 export const BLOCK_LABELS = Object.freeze({ strip: 'Surface tracing', egm: 'Intracardiac channels', ladder: 'Ladder' });
 
 export const DEFAULT_EP = Object.freeze({
-    catheters: DEFAULT_CATHETERS, hisSplit: false, apSite: 'auto', vOrigin: 'RV',
+    catheters: DEFAULT_CATHETERS, hisSplit: false, apSite: 'auto', vOrigin: 'RV', atSite: 'highRA', csDistalFirst: false,
     speedMmS: 100, order: BLOCK_ORDERS[0], showLetters: true, showAhHv: true,
 });
 
@@ -85,6 +91,10 @@ export function cleanEp(o) {
         hisSplit: o.hisSplit === true,
         apSite: AP_SITES.includes(o.apSite) ? o.apSite : 'auto',
         vOrigin: V_ORIGINS.includes(o.vOrigin) ? o.vOrigin : 'RV',
+        atSite: AT_SITES.includes(o.atSite) ? o.atSite : 'highRA',
+        // the coronary sinus listed CS 9-10 → CS 1-2 (proximal first, as Abedin's tracings) or CS 1-2 → CS 9-10
+        // (distal first, as Kusumoto's): both are lab conventions
+        csDistalFirst: o.csDistalFirst === true,
         speedMmS: EP_SPEEDS.includes(+o.speedMmS) ? +o.speedMmS : DEFAULT_EP.speedMmS,
         order,
         showLetters: o.showLetters !== false,
@@ -96,7 +106,8 @@ export function cleanEp(o) {
 export function channelsOf(ep) {
     const e = cleanEp(ep) ?? cleanEp({});
     const out = [];
-    for (const id of CATHETER_IDS) {
+    const list = e.csDistalFirst ? CATHETER_IDS.map(id => (CS.includes(id) ? CS[CS.length - 1 - CS.indexOf(id)] : id)) : CATHETER_IDS;
+    for (const id of list) {
         if (!e.catheters.includes(id)) continue;
         if (id === 'His' && e.hisSplit) out.push('Hisp', 'Hisd');
         else out.push(id);
@@ -120,21 +131,27 @@ export const egmLayoutOptions = (ep) => {
 export function atrialSequence(origin, P = resolveParams({})) {
     const pa = P.PA;
     switch (origin) {
-        // from the sinus node (or a high atrial focus, or pacing at the HRA): down the right atrium to the
-        // septum PA later, then across the left atrium proximal to distal along the coronary sinus
-        case 'sinus': return { HRA: 0, HisA: pa, CS910: pa + 10, CS78: pa + 20, CS56: pa + 30, CS34: pa + 40, CS12: pa + 50 };
-        // up the fast pathway: the anterior septum first, concentric (proximal to distal), the HRA late
+        // from the sinus node (or a focus on the crista terminalis, or pacing at the HRA): the high right atrium
+        // fires before the surface P is inscribed (too little tissue yet for the ECG — Kusumoto ch. 2), the
+        // septum PA after the P onset, then the left atrium proximal to distal along the coronary sinus
+        case 'sinus': case 'highRA': return { HRA: -10, HisA: pa, CS910: pa + 10, CS78: pa + 20, CS56: pa + 30, CS34: pa + 40, CS12: pa + 50 };
+        // up the fast pathway: the anterior septum first (the His catheter, with the ostium within 10 ms),
+        // concentric proximal to distal, the HRA late
         case 'fast': return { HisA: 0, CS910: 10, CS78: 20, CS56: 30, CS34: 40, CS12: 50, HRA: 35 };
-        // up the slow pathway: the posterior septum, at the coronary sinus ostium, before the His
-        case 'slow': return { CS910: 0, CS78: 10, HisA: 15, CS56: 20, CS34: 30, CS12: 40, HRA: 45 };
-        // up a left lateral accessory pathway: eccentric, the distal coronary sinus first
-        case 'apLeftLateral': return { CS12: 0, CS34: 10, CS56: 20, CS78: 30, CS910: 40, HisA: 50, HRA: 70 };
-        // up a posteroseptal pathway: the coronary sinus ostium first, then the septum
-        case 'apSeptal': return { CS910: 0, HisA: 5, CS78: 10, CS56: 20, CS34: 30, CS12: 40, HRA: 35 };
+        // up the slow pathway (or a focus at the ostium): the posteroseptal atrium at the coronary sinus ostium
+        // first, the His atrium 30–60 ms later (Abedin 5.5, slow–slow AVNRT)
+        case 'slow': case 'csOs': return { CS910: 0, CS78: 10, CS56: 20, HisA: 30, CS34: 30, CS12: 40, HRA: 55 };
+        // up a left lateral accessory pathway (or a left atrial focus): eccentric, the distal coronary sinus first
+        case 'apLeftLateral': case 'leftAtrium': return { CS12: 0, CS34: 10, CS56: 20, CS78: 30, CS910: 40, HisA: 50, HRA: 70 };
+        // up a posteroseptal pathway: the coronary sinus ostium first, the His atrium 20 ms later — near-concentric
+        case 'apSeptal': return { CS910: 0, CS78: 10, CS56: 20, HisA: 20, CS34: 30, CS12: 40, HRA: 45 };
+        // a septal atrial focus (the fossa, Koch's triangle): the His atrium and the ostium together, both sides late
+        case 'septal': return { HisA: 0, CS910: 5, CS78: 15, CS56: 25, CS34: 35, CS12: 45, HRA: 40 };
         // up a right free-wall pathway: the lateral right atrium first, the coronary sinus last
         case 'apRightLateral': return { HRA: 0, HisA: 25, CS910: 35, CS78: 45, CS56: 55, CS34: 65, CS12: 75 };
-        // typical (counter-clockwise) flutter: up the septum — ostium and His first — and down the lateral wall
-        case 'flutter': return { CS910: 0, HisA: 10, CS78: 10, CS56: 20, CS34: 30, CS12: 40, HRA: 100 };
+        // typical (counter-clockwise) flutter: out of the cavotricuspid isthmus into the ostium, up the septum to
+        // the His region, across the left atrium proximal to distal, and down the lateral wall to the HRA last
+        case 'flutter': return { CS910: 0, CS78: 10, CS56: 20, HisA: 30, CS34: 30, CS12: 40, HRA: 100 };
         default: return atrialSequence('sinus', P);
     }
 }
@@ -231,7 +248,7 @@ const near = (a, b, tol = 1.5) => Math.abs(a - b) <= tol;
  * Every chamber and His activation a ladder draws, with where it came from.
  * @returns [{ kind: 'A'|'f'|'H'|'V', tMs, origin, beatId, atrialId, retro?, prime? }] sorted by time
  */
-export function ladderActivations(L, { apSite = 'leftLateral', vOrigin = 'RV', beats = [] } = {}) {
+export function ladderActivations(L, { apSite = 'leftLateral', vOrigin = 'RV', atSite = 'highRA', beats = [] } = {}) {
     const acts = [];
     const beatById = new Map(beats.map(b => [b.id, b]));
     let nf = 0;
@@ -239,7 +256,8 @@ export function ladderActivations(L, { apSite = 'leftLateral', vOrigin = 'RV', b
     for (const e of L.events) {
         if (e.tier !== 'A') continue;
         const base = { tMs: e.tMs, beatId: e.beatId ?? null, atrialId: e.atrialId ?? null };
-        if (e.role === 'p' || e.role === 'p-edge' || e.role === 'focus-atrial') acts.push({ kind: 'A', origin: 'sinus', ...base });
+        if (e.role === 'p' || e.role === 'p-edge') acts.push({ kind: 'A', origin: 'sinus', ...base });
+        else if (e.role === 'focus-atrial') acts.push({ kind: 'A', origin: atSite, ...base });
         else if (e.role === 'F') acts.push({ kind: 'A', origin: 'flutter', ...base });
         else if (e.role === 'f') acts.push({ kind: 'f', n: nf++, ...base });
         else if (e.role === 'p-retro') {
@@ -333,7 +351,7 @@ export function egmSchedule(input, ep = DEFAULT_EP) {
     const beats = input.beats || [];
     const L = buildLadder({ beats, atrial: input.atrial || [], mechanism: input.mechanism, params: input.params, tiers, durationMs: input.durationMs });
     const apSite = opts.apSite === 'auto' ? (L.mechanism === 'pjrt' ? 'septal' : 'leftLateral') : opts.apSite;
-    const activations = ladderActivations(L, { apSite, vOrigin: opts.vOrigin, beats });
+    const activations = ladderActivations(L, { apSite, vOrigin: opts.vOrigin, atSite: opts.atSite, beats });
     const deflections = activations.flatMap(a => activationDeflections(a, P)).sort((a, b) => a.tMs - b.tMs);
 
     const letters = deflections.filter(d => d.ch === 'His' && (d.kind === 'A' || d.kind === 'H' || d.kind === 'V'))

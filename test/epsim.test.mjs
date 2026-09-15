@@ -281,6 +281,13 @@ section('the live recorder');
     ok('an RV beat: wide and negative in V1; an LV beat: positive in V1', surfaceAt([{ kind: 'V', tMs: 0, origin: 'RV' }], 'V1', 70) < -0.8 && surfaceAt([{ kind: 'V', tMs: 0, origin: 'LV' }], 'V1', 50) > 0.8);
     ok('a sinus P is upright in II, a retrograde one inverted', surfaceAt([{ kind: 'A', tMs: 0, origin: 'sinus' }], 'II', 45) > 0.08 && surfaceAt([{ kind: 'A', tMs: 0, origin: 'fast' }], 'II', 45) < -0.1);
     ok('the baseline between beats is flat', Math.abs(surfaceAt(V, 'II', -200)) < 1e-9 && Math.abs(surfaceAt(V, 'II', 750)) < 1e-9);
+    const pre = (o, lead, t) => surfaceAt([{ kind: 'V', tMs: 0, origin: o }], lead, t);
+    ok('pre-excited over a left lateral pathway: RBBB-like, positive in V1', pre('preLeftLateral', 'V1', 80) > 0.5 && pre('preLeftLateral', 'II', 70) > 0.5);
+    ok('over a right free-wall pathway: LBBB-like, negative in V1', pre('preRightLateral', 'V1', 80) < -0.5 && pre('preRightLateral', 'II', 70) > 0.5);
+    ok('over a posteroseptal pathway: negative delta waves in the inferior leads', pre('preSeptal', 'II', 25) < -0.3 && pre('preSeptal', 'II', 70) < -0.4);
+    const pOf = (o, lead) => surfaceAt([{ kind: 'A', tMs: 0, origin: o }], lead, lead === 'II' ? 45 : 40);
+    ok('a P from a high right atrial focus is upright in II; from the ostium, a septal focus or a pathway it is inverted', pOf('highRA', 'II') > 0.08 && pOf('csOs', 'II') < -0.1 && pOf('septal', 'II') < -0.1 && pOf('apSeptal', 'II') < -0.1);
+    ok('a left atrial P is upright in V1 and low in II', pOf('leftAtrium', 'V1') > 0.08 && Math.abs(pOf('leftAtrium', 'II')) < 0.08);
 
     const sim = heart(reading('sinus', 'avnodal'));
     sim.runUntil(4000);

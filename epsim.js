@@ -115,7 +115,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
     const L = buildLadder({ beats, atrial, mechanism: input.mechanism, params: input.params, tiers, durationMs: input.durationMs });
     const mech = L.mechanism;
     const apSite = opts.apSite === 'auto' ? (mech === 'pjrt' ? 'septal' : 'leftLateral') : opts.apSite;
-    const vOrigin = opts.vOrigin;
+    const vOrigin = opts.vOrigin, atSite = opts.atSite;
 
     const q = beats.map(b => b.qrsOnMs);
     const q0 = q.length ? q[0] : 400;
@@ -234,7 +234,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
             const cyc = median(diffs(focus)) ?? PP, f0 = focus[0] ?? p0;
             sn.auto = { cycleMs: Math.max(cyc * 1.4, 700), firstMs: f0 + Math.max(cyc * 1.4, 700) };
             node('FA', { erp: 150, auto: { cycleMs: cyc, firstMs: f0 } });
-            link('fa', 'FA', 'A', { ante: fixed(0), retro: fixed(0), tagTo: 'sinus' });
+            link('fa', 'FA', 'A', { ante: fixed(0), retro: fixed(0), tagTo: atSite });
             fast.ante = fitPath(AH, cyc - AH, nodalErp(cyc - AH));
             const prev = f0 - cyc;
             Object.assign(lasts, { A: prev, fast: prev + AH, H: prev + AH, hv: prev + PR, V: prev + PR });
@@ -393,7 +393,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
     const firsts = [...nodes.map(n => n.auto?.firstMs).filter(Number.isFinite), ...force.map(f => f.tMs), 0];
     const t0Ms = Math.min(...firsts) - 5;
     return {
-        mechanism: mech, apSite, vOrigin, P: { ...P }, nodes, links, couplers,
+        mechanism: mech, apSite, vOrigin, atSite, P: { ...P }, nodes, links, couplers,
         // the tail of the cycle before the first beat, when the ladder already draws it
         seeds: { lasts, force, shown: shown.filter(a => a.tMs >= t0Ms && L.events.some(e => e.tier === 'A' && Math.abs(e.tMs - a.tMs) < 1)).map(a => ({ ...a, tMs: r1(a.tMs) })) }, t0Ms,
         durationMs: input.durationMs ?? null,
