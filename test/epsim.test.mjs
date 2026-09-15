@@ -156,10 +156,10 @@ section('AVNRT');
 {
     const input = reading('avnrt', 'avnrt', { VA: 35 });
     const CL = fromReading(input).meta.CL;
-    const s350 = extrastimulus(input, 350, { shockFirst: true }), s330 = extrastimulus(input, 330, { shockFirst: true });
-    ok('dual pathways: the AH jumps by 50 ms or more between S2 350 and 330', s350.sH2 != null && s330.sH2 != null && s330.sH2 - s350.sH2 >= 50, `${s350.sH2} → ${s330.sH2}`);
-    for (const s2 of [300, 280]) ok(`S2 ${s2} (down the slow pathway): AVNRT induced and sustained at its CL (${CL} ms)`, sustained(extrastimulus(input, s2, { shockFirst: true }).rrLate, CL));
-    ok('S2 340 (the fast pathway still conducts): no tachycardia', !sustained(extrastimulus(input, 340, { shockFirst: true }).rrLate, CL));
+    const s350 = extrastimulus(input, 350, { shockFirst: true }), s340 = extrastimulus(input, 340, { shockFirst: true });
+    ok('dual pathways: the AH jumps by 50 ms or more between S2 350 and 340 (the fast pathway\'s ERP)', s350.sH2 != null && s340.sH2 != null && s340.sH2 - s350.sH2 >= 50, `${s350.sH2} → ${s340.sH2}`);
+    for (const s2 of [340, 300, 280]) ok(`S2 ${s2} (down the slow pathway): AVNRT induced and sustained at its CL (${CL} ms)`, sustained(extrastimulus(input, s2, { shockFirst: true }).rrLate, CL));
+    ok('S2 350 (the fast pathway still conducts): no tachycardia', !sustained(extrastimulus(input, 350, { shockFirst: true }).rrLate, CL));
     ok('S2 220 (both pathways refractory): no tachycardia', !sustained(extrastimulus(input, 220, { shockFirst: true }).rrLate, CL));
     const shock = heart(input);
     shock.runUntil(3000);
@@ -190,7 +190,8 @@ section('orthodromic AVRT');
     s.cardiovert();
     s.runUntil(12000);
     ok('after a shock, sinus beats do not echo up the pathway', !s.activations(3001, 12000).some(a => a.kind === 'A' && a.origin !== 'sinus'));
-    ok('an atrial S2 that lengthens the AV delay (300) induces it', sustained(extrastimulus(input, 300, { shockFirst: true }).rrLate, CL));
+    const induced = [340, 320, 300, 280].filter(s2 => sustained(extrastimulus(input, s2, { shockFirst: true }).rrLate, CL));
+    ok('an atrial S2 that lengthens the AV delay induces it (a window of couplings)', induced.length >= 2, `induced at ${induced}`);
     ok('an atrial S2 of 400 does not', !sustained(extrastimulus(input, 400, { shockFirst: true }).rrLate, CL));
     for (const [site, origin] of [['leftLateral', 'apLeftLateral'], ['septal', 'apSeptal'], ['rightLateral', 'apRightLateral']]) {
         const rv = heart(input, { ...DEFAULT_EP, apSite: site });

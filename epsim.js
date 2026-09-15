@@ -61,6 +61,14 @@ export function fitPath(atMs, diMs, erp, { span = 100, tau = 120 } = {}) {
     return { min: atMs - sp * e, span: sp, tau, erp };
 }
 const fixed = (ms, erp = 0) => ({ min: ms, span: 0, tau: 100, erp });
+/**
+ * A limb of a re-entrant circuit, fitted gently: its delay is `atMs` at the recovery `diMs` the tachycardia
+ * gives it, it lengthens by at most a quarter of that as the recovery shortens, and it blocks under half that
+ * recovery. Steep curves made every circuit collapse under pacing 30 ms faster than the tachycardia — a
+ * Wenckebach in the slow pathway within three beats — where the textbooks (Kusumoto ch. 5, Abedin 5.5–5.6)
+ * expect entrainment, with the tachycardia resuming when pacing stops.
+ */
+const limb = (atMs, diMs, o = {}) => fitPath(atMs, diMs, o.erp ?? 0.5 * diMs, { span: o.span ?? 0.25 * atMs, tau: o.tau ?? 200 });
 
 /**
  * A recovery curve through the (DI, delay) pairs of a Wenckebach period: exactly through the longest
@@ -132,20 +140,20 @@ export function fromReading(input, ep = DEFAULT_EP) {
 
     const nodes = [], links = [], couplers = [], lasts = {}, force = [], shown = [];
     const node = (id, o = {}) => { nodes.push({ id, erp: 0, ...o }); };
-    const link = (id, from, to, o = {}) => { links.push({ id, from, to, ante: o.ante ?? null, retro: o.retro ?? null, tagTo: o.tagTo ?? null, tagFrom: o.tagFrom ?? null }); };
+    const link = (id, from, to, o = {}) => { links.push({ id, from, to, ante: o.ante ?? null, retro: o.retro ?? null, tagTo: o.tagTo ?? null, tagFrom: o.tagFrom ?? null, ...(o.nodal ? { nodal: true } : {}) }); };
     const byId = (id) => nodes.find(n => n.id === id) || links.find(l => l.id === id);
 
     // The chambers and the sinus node, as every reading has them.
     node('SN', { erp: 150, auto: { cycleMs: PP, firstMs: p0 - P.SACT } });
     node('A', { kind: 'A', erp: mech === 'afib' ? 80 : 200 });
     node('H', { kind: 'H', erp: 250 });
-    node('V', { kind: 'V', erp: 250 });
+    node('V', { kind: 'V', erp: Math.min(250, Math.max(180, 0.65 * CL)) });   // shorter at the rates of a tachycardia
     const AH = PR - HV;                                                  // P onset → His: the delay of the AV path (PA + AH)
     // AV nodal refractoriness counted from the end of the last conduction: a quarter of the recovery the rhythm
     // gives it, 150–250 ms (a coupling ERP of ~300–400 ms at usual rates), and always shorter than that recovery
     const nodalErp = (di) => Math.min(0.8 * di, Math.max(150, Math.min(250, 0.25 * di)));
     link('sa', 'SN', 'A', { ante: fixed(P.SACT), retro: fixed(P.SACT), tagTo: 'sinus' });
-    link('fast', 'A', 'H', { ante: fitPath(AH, PP - AH, nodalErp(PP - AH)), retro: fitPath(110, 600, 300, { span: 60 }), tagFrom: 'fast' });
+    link('fast', 'A', 'H', { ante: fitPath(AH, PP - AH, nodalErp(PP - AH)), retro: fitPath(110, 600, 300, { span: 60 }), tagFrom: 'fast', nodal: true });
     link('hv', 'H', 'V', { ante: fixed(HV), retro: fixed(P.vExit), tagTo: vTag, tagFrom: 'retro' });
     const fast = byId('fast'), hv = byId('hv'), sn = byId('SN');
     // A ventricular beat that does not reach the atrium still penetrates the node, and leaves it refractory
@@ -161,46 +169,64 @@ export function fromReading(input, ep = DEFAULT_EP) {
     switch (mech) {
         case 'avnrt': {
             sn.auto.firstMs = q0 + PP;                                   // overdriven by the tachycardia
-            const ante = CL - VA - HV, back = VA + HV;
-            const typical = ante >= back;
-            link('slow', 'A', 'H', { tagFrom: 'slow' });
+            // The circuit closes in the compact node (N), a lower common pathway (`lcp` ms) above the His: what makes
+            // the His and the ventricle bystanders, and what the entrainment maneuvers measure — from the RV apex the
+            // circuit is reached through the His–Purkinje system and that pathway, so PPI − TCL exceeds 115 ms and
+            // the His and the atrium are activated in series (ΔHA > 0), where in AVRT they are not (Abedin 5.5).
+            const lcp = 25;
+            node('N', { erp: 120 });
+            fast.to = 'N';
+            link('slow', 'A', 'N', { tagFrom: 'slow', nodal: true });
+            link('lcp', 'N', 'H', { ante: fixed(lcp), retro: fixed(lcp), nodal: true });
             const slow = byId('slow');
-            const H0 = q0 - HV, Aprev = q0 + VA - CL;
+            const ante = CL - VA - HV - lcp, back = VA + HV + lcp;       // A → N down one limb, N → A up the other
+            const typical = ante >= back;
+            const H0 = q0 - HV, N0 = H0 - lcp, Aprev = q0 + VA - CL;
             if (typical) {
                 // down the slow pathway, up the fast one: at every retrograde P the fast pathway has only just
                 // finished conducting and refuses; the slow one has recovered and takes the wave down again
-                slow.ante = fitPath(ante, back, 0.6 * back);
-                fast.retro = fitPath(back, ante, 0.75 * ante, { span: 40 });
-                fast.ante = fitPath(P.PA + 80, 800, 0.75 * ante);
-                Object.assign(lasts, { slow: H0, fast: Aprev });
+                slow.ante = limb(ante, back);
+                fast.retro = limb(back, ante, { span: 0.15 * back });
+                // the compact node invades the slow pathway from below: a sinus beat's wave down it meets its own
+                // wave coming back and dies (no double response); a PVC's wave meets the circulating one
+                slow.retro = { ...fixed(0.5 * back), conceal: [] };
+                // the fast pathway's anterograde refractory period is the long one: an atrial extrastimulus around
+                // 330–350 ms after a 600 drive blocks in it and takes the slow pathway — the AH jump (Kusumoto 10.6–10.7)
+                fast.ante = fitPath(P.PA + 80 - lcp, 800, Math.max(0.75 * ante, 240));
+                Object.assign(lasts, { slow: N0, fast: Aprev });
             } else {
                 // atypical: down the fast pathway, up the slow one
-                fast.ante = fitPath(ante, back, 0.6 * back);
-                slow.retro = fitPath(back, ante, 0.75 * ante, { span: 40 });
+                fast.ante = limb(ante, back, { span: 0.15 * ante });
+                slow.retro = limb(back, ante);
                 fast.retro = null;
-                Object.assign(lasts, { fast: H0, slow: Aprev });
+                // every atrial wave also enters the slow pathway from above and dies in it, meeting the retrograde
+                // limb of the circuit when there is one: sinus rhythm does not echo, a paced atrium is entrained
+                slow.ante = { ...fixed(ante + 40), conceal: [] };
+                Object.assign(lasts, { fast: N0, slow: Aprev });
             }
-            Object.assign(lasts, { A: Aprev, H: H0 - CL, V: q0 - CL, hv: q0 - CL });
+            Object.assign(lasts, { A: Aprev, N: N0 - CL, lcp: H0 - CL, H: H0 - CL, V: q0 - CL, hv: q0 - CL });
             shown.push({ kind: 'A', tMs: Aprev, origin: typical ? 'fast' : 'slow' });
-            force.push({ node: 'H', tMs: H0, via: typical ? 'slow' : 'fast' });
+            force.push({ node: 'N', tMs: N0, via: typical ? 'slow' : 'fast' });
             break;
         }
         case 'avrt': case 'pjrt': {
             sn.auto.firstMs = q0 + PP;
             const ante = CL - VA - HV;
+            // the node's ordinary decrement: an atrial extrastimulus lengthens the AH enough for the pathway to recover
             fast.ante = fitPath(ante, VA + HV, Math.max(20, 0.75 * (VA + HV)));
             fast.retro = null;                                           // the node is refractory behind every beat
-            const apRetro = fitPath(VA, CL - VA, 0.75 * (CL - VA), mech === 'pjrt' ? { span: 150, tau: 200 } : { span: 0 });
-            link('ap', 'A', 'V', { retro: apRetro, tagFrom: AP_ATRIAL[apSite] });
-            {
-                // A concealed pathway still takes the atrial wave in, and blocks it at the ventricular end: after a
-                // sinus beat it is still refractory when the ventricle reaches it, so sinus rhythm does not echo.
-                // An atrial extrastimulus that lengthens the AV delay gives it time to recover — the induction.
-                const pen = 30;
-                const sinusPR = conductionDelay(fast.ante, 1000) + HV;
-                apRetro.erp = Math.min(CL - VA - 5, Math.max(apRetro.erp, sinusPR - pen + 20));
-                byId('ap').ante = { ...fixed(pen), conceal: [] };
-            }
+            // A concealed pathway is entered by every atrial wave, which crawls into it for `pen` ms and dies at the
+            // ventricular end, leaving it refractory: after a sinus beat the ventricle reaches it too soon, so sinus
+            // rhythm does not echo, and an atrial extrastimulus that lengthens the AV delay gives it time to recover —
+            // the induction. A retrograde wave does not re-enter the pathway it just came up, so in tachycardia the
+            // pathway recovers for CL − VA, and a PVC coupled well inside the cycle still finds it able to conduct
+            // (Abedin 5.6: a His-refractory PVC advances the atrium in AVRT).
+            const pen = 80, diAp = CL - VA;
+            const sinusPR = conductionDelay(fast.ante, 1000) + HV;
+            const erpAp = Math.min(diAp - 5, Math.max(0.5 * diAp, sinusPR - pen + 10));
+            // a fast pathway conducts without decrement; PJRT's slow pathway decrements, and lengthens the VA under pacing
+            const apRetro = mech === 'pjrt' ? limb(VA, diAp, { erp: erpAp }) : fitPath(VA, diAp, erpAp, { span: 0 });
+            link('ap', 'A', 'V', { retro: apRetro, ante: { ...fixed(pen), conceal: [] }, tagFrom: AP_ATRIAL[apSite] });
             const H0 = q0 - HV, Aprev = q0 + VA - CL;
             Object.assign(lasts, { A: Aprev, H: H0 - CL, V: q0 - CL, hv: q0 - CL, fast: H0, ap: Aprev });
             shown.push({ kind: 'A', tMs: Aprev, origin: AP_ATRIAL[apSite] });
@@ -212,7 +238,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
             link('ap', 'A', 'V', { ante: fitPath(CL - VA, VA, 0.75 * VA, { span: 0 }), tagTo: AP_VENT[apSite] });
             hv.retro = fixed(P.vhMs);
             const back = Math.max(10, VA - P.vhMs);
-            fast.retro = fitPath(back, CL - back, 0.75 * (CL - back), { span: 0 });
+            fast.retro = limb(back, CL - back, { span: 0.1 * back });
             const Aprev = q0 + VA - CL;
             Object.assign(lasts, { A: Aprev, V: q0 - CL, H: q0 + P.vhMs - CL, ap: q0, hv: q0 + P.vhMs - CL, fast: Aprev });
             shown.push({ kind: 'A', tMs: Aprev, origin: 'fast' });
@@ -224,7 +250,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
             node('FH', { erp: 150, auto: { cycleMs: CL, firstMs: q0 - HV } });
             link('fh', 'FH', 'H', { ante: fixed(0), retro: fixed(0) });
             const back = VA + HV;
-            fast.retro = fitPath(back, CL - back, 0.75 * (CL - back), { span: 0 });
+            fast.retro = limb(back, CL - back, { span: 0.1 * back });
             Object.assign(lasts, { H: q0 - HV - CL, V: q0 - CL, hv: q0 - CL, fast: q0 + VA - CL, A: q0 + VA - CL });
             shown.push({ kind: 'A', tMs: q0 + VA - CL, origin: 'fast' });
             break;
@@ -236,6 +262,9 @@ export function fromReading(input, ep = DEFAULT_EP) {
             node('FA', { erp: 150, auto: { cycleMs: cyc, firstMs: f0 } });
             link('fa', 'FA', 'A', { ante: fixed(0), retro: fixed(0), tagTo: atSite });
             fast.ante = fitPath(AH, cyc - AH, nodalErp(cyc - AH));
+            // the node conducts back at the rates the ventricle is paced during the tachycardia, so the atrium is
+            // captured, the focus reset by every beat, and the response on cessation is V-A-A-V (Kusumoto 5.19)
+            fast.retro = fitPath(110, Math.max(150, cyc - 150), Math.min(300, 0.5 * (cyc - 110)), { span: 60 });
             const prev = f0 - cyc;
             Object.assign(lasts, { A: prev, fast: prev + AH, H: prev + AH, hv: prev + PR, V: prev + PR });
             break;
@@ -254,7 +283,8 @@ export function fromReading(input, ep = DEFAULT_EP) {
             const F = L.events.filter(e => e.role === 'F').map(e => e.tMs).sort((a, b) => a - b);
             const FF = L.flutter?.cycleMs ?? median(diffs(F)) ?? 220;
             const k = Math.max(1, Math.round(CL / FF));
-            node('FA', { erp: 100, auto: { cycleMs: FF, firstMs: F[0] ?? 0, shockable: true } });
+            node('FA', { erp: 100, auto: { cycleMs: FF, firstMs: F[0] ?? 0, shockable: true, paceTerminable: 'A' } });
+            byId('A').erp = Math.min(200, 0.7 * FF);                     // an atrium that flutters at FF recovers well inside it
             link('fa', 'FA', 'A', { ante: fixed(0), retro: fixed(0), tagTo: 'flutter' });
             const FR = median(L.intervals.map(i => i.PRms).filter(x => x != null)) ?? (P.PA + 150 + HV);
             const d = FR - HV;
@@ -289,7 +319,7 @@ export function fromReading(input, ep = DEFAULT_EP) {
             const ids = beats.map(b => b.id);
             const vtRR = median(focus.slice(1).map((f, i) => (ids.indexOf(f.id) === ids.indexOf(focus[i].id) + 1 ? f.t - focus[i].t : NaN))) ?? CL;
             const first = focus[0]?.t ?? q0;
-            node('FV', { erp: 150, auto: { cycleMs: vtRR, firstMs: first, shockable: true } });
+            node('FV', { erp: 150, auto: { cycleMs: vtRR, firstMs: first, shockable: true, paceTerminable: 'V' } });
             link('fv', 'FV', 'V', { ante: fixed(0), retro: fixed(0), tagTo: vOrigin });
             const back = P.ectopicVA != null ? Math.max(10, P.ectopicVA - P.vExit) : null;
             fast.retro = back != null ? fitPath(back, Math.max(50, vtRR - back), 0.6 * Math.max(50, vtRR - back), { span: 0 }) : concealedRetro();
@@ -413,7 +443,7 @@ const KEEP_MS = 60000;
  *   step(dtMs) → activations recorded in that step: [{ kind: 'A'|'f'|'H'|'V'|'S'|'shock', tMs, origin?, retro?, prime?, site?, n? }]
  *   runUntil(tMs), activations(fromMs, toMs), schedule(fromMs, toMs) → { activations, deflections },
  *   pace({ site: 'HRA'|'RVa', s1Ms, n1, s2Ms, s3Ms, s4Ms, sense, continuous }), cancelPacing(), pacing,
- *   cardiovert()
+ *   cardiovert(), adenosine({ durationMs })
  * }
  */
 export function createSim(spec, { seed = 7 } = {}) {
@@ -441,7 +471,11 @@ export function createSim(spec, { seed = 7 } = {}) {
         while (lo < hi) { const m = (lo + hi) >> 1; const e = queue[m]; if (e.t < ev.t || (e.t === ev.t && e.seq < ev.seq)) lo = m + 1; else hi = m; }
         queue.splice(lo, 0, ev);
     };
-    const cycleOf = (n) => n.auto.cycleMs * (n.auto.jitter ? 1 - n.auto.jitter + 2 * n.auto.jitter * rnd() : 1);
+    // An automatic focus driven from outside — overdriven by pacing, by a tachycardia, by retrograde conduction —
+    // is suppressed: its next cycle is longer by 4 % per beat it was captured, up to a third (the sinus node
+    // recovery time after pacing; the pause before an atrial or junctional focus resumes — Kusumoto 4.1, 11.7).
+    const cycleOf = (n) => n.auto.cycleMs * (n.auto.jitter ? 1 - n.auto.jitter + 2 * n.auto.jitter * rnd() : 1)
+        * (n.slowUntil > now ? 1.15 : 1) * (1 + 0.04 * Math.min(n.resets || 0, 8));
     const schedAuto = (n, t) => { n.gen++; push({ t, type: 'auto', node: n.id, gen: n.gen }); };
 
     for (const n of nodes.values()) if (n.auto && Number.isFinite(n.auto.firstMs)) schedAuto(n, n.auto.firstMs);
@@ -460,6 +494,7 @@ export function createSim(spec, { seed = 7 } = {}) {
     function activate(n, t, viaId, tag) {
         if (t - n.last < n.erp) return false;
         n.last = t;
+        if (n.auto && !n.auto.shockable) n.resets = viaId ? (n.resets || 0) + 1 : 0;   // a re-entrant driver is not suppressed, only broken
         if (n.kind) {
             const kind = n.kind === 'A' && tag === 'af' ? 'f' : n.kind;
             const act = { kind, tMs: r1(t) };
@@ -481,7 +516,17 @@ export function createSim(spec, { seed = 7 } = {}) {
     function conduct(l, from, t) {
         const forward = from.id === l.from;
         const p = forward ? l.ante : l.retro;
-        if (!p || t < l.busyUntil) return;                          // still carrying the last wave: a collision
+        if (!p) return;
+        if (t < l.busyUntil) {
+            // still carrying the last wave. Entered from the other end while that wave is in flight, the two meet
+            // head-on and both die (a paced atrial wave meeting the retrograde limb it overtook; a ventricular
+            // beat's retrograde penetration meeting the descending wave); the pathway recovers as if the first
+            // wave had crossed it, so the recovery curves fitted to the reading keep their meaning
+            const w = l.inflight;
+            if (w && w.forward !== forward && w.t > t) { w.cancelled = true; l.inflight = null; }
+            return;
+        }
+        if (l.blockedUntil > t) return;                               // adenosine: the node does not conduct
         const DI = t - l.busyUntil;
         if (DI < p.erp) return;
         if (p.pattern && !p.pattern[l.waves++ % p.pattern.length]) return;
@@ -489,9 +534,11 @@ export function createSim(spec, { seed = 7 } = {}) {
         l.busyUntil = t + delay;
         if (p.conceal) {
             for (const id of p.conceal) { const k = links.get(id); if (k) k.busyUntil = Math.max(k.busyUntil, t + delay); }
+            l.inflight = { t: t + delay, forward };                   // dies inside, but a wave from the other end still meets it
             return;
         }
-        push({ t: t + delay, type: 'arrive', node: forward ? l.to : l.from, via: l.id, tag: forward ? l.tagTo : l.tagFrom });
+        l.inflight = { t: t + delay, forward, type: 'arrive', node: forward ? l.to : l.from, via: l.id, tag: forward ? l.tagTo : l.tagFrom };
+        push(l.inflight);
     }
 
     function handle(ev) {
@@ -500,6 +547,7 @@ export function createSim(spec, { seed = 7 } = {}) {
             if (!n || ev.gen !== n.gen || n.silenced) return;
             if (!activate(n, ev.t, null, n.auto?.tag ?? null)) schedAuto(n, ev.t + cycleOf(n));
         } else if (ev.type === 'arrive' || ev.type === 'force') {
+            if (ev.cancelled) return;
             const n = nodes.get(ev.node);
             if (!n) return;
             if (ev.type === 'force') n.last = Math.min(n.last, ev.t - n.erp - 1);
@@ -513,7 +561,15 @@ export function createSim(spec, { seed = 7 } = {}) {
             if (!pacer || ev.gen !== pacer.gen) return;
             record({ kind: 'S', tMs: r1(ev.t), site: pacer.site });
             const chamber = nodes.get(CHAMBER_OF_SITE[pacer.site]);
-            activate(chamber, ev.t, null, pacer.site === 'HRA' ? 'sinus' : 'RV');
+            const captured = activate(chamber, ev.t, null, pacer.site === 'HRA' ? 'sinus' : 'RV');
+            // Overdrive termination: a re-entrant driver in the paced chamber (flutter, VT) that is captured eight
+            // times running at a cycle well under its own is broken — the circuit is invaded from both ends
+            // (Kusumoto 14.6; Abedin 5.1). An automatic focus is only suppressed, and fires again after its cycle.
+            for (const n of nodes.values()) {
+                if (!n.auto?.paceTerminable || n.auto.paceTerminable !== chamber.id || n.silenced) continue;
+                n.captures = captured && pacer.s1Ms <= 0.92 * n.auto.cycleMs ? (n.captures || 0) + 1 : 0;
+                if (n.captures >= 8) { n.silenced = true; n.gen++; }
+            }
             if (pacer.continuous) push({ t: ev.t + pacer.s1Ms, type: 'stim', gen: pacer.gen });
             else if (pacer.i < pacer.intervals.length) push({ t: ev.t + pacer.intervals[pacer.i++], type: 'stim', gen: pacer.gen });
             else pacer = null;
@@ -538,7 +594,7 @@ export function createSim(spec, { seed = 7 } = {}) {
         return out;
     }
 
-    function cancelPacing() { pacer = null; }
+    function cancelPacing() { pacer = null; for (const n of nodes.values()) n.captures = 0; }
 
     /**
      * The stimulator: S1 × n1 then S2, S3, S4 (each measured from the stimulus before it), from the HRA or the
@@ -554,6 +610,20 @@ export function createSim(spec, { seed = 7 } = {}) {
     }
 
     /**
+     * Adenosine: the AV node stops conducting, both ways, for `durationMs` (its pathways, the lower common
+     * pathway included — not an accessory pathway, not a focus), and the sinus node slows a little. What depends
+     * on the node stops — AVNRT, AVRT, PJRT, antidromic AVRT; an atrial tachycardia, flutter or fibrillation
+     * goes on above a ventricular pause, a junctional focus below one, and VT is untouched (Kusumoto 5.23, 6.9).
+     */
+    function adenosine({ durationMs = 6000 } = {}) {
+        const t = now;
+        record({ kind: 'adenosine', tMs: r1(t) });
+        for (const l of links.values()) if (l.nodal) l.blockedUntil = t + durationMs;
+        const sn = nodes.get('SN');
+        if (sn) sn.slowUntil = t + durationMs;
+    }
+
+    /**
      * A synchronised shock: every node and path depolarised at once. Re-entry stops (no path is left to carry
      * it), and so do the rhythms this model draws as a driver but that are re-entrant in the heart —
      * fibrillation, flutter, ventricular tachycardia (`shockable`); an automatic focus fires again after its
@@ -565,7 +635,7 @@ export function createSim(spec, { seed = 7 } = {}) {
         queue = queue.filter(e => e.type === 'auto');
         pacer = null;
         for (const n of nodes.values()) {
-            n.last = t;
+            n.last = t; n.resets = 0;
             if (!n.auto || !Number.isFinite(n.auto.cycleMs)) continue;
             if (n.auto.shockable) { n.gen++; n.silenced = true; }        // the circuit is gone: nothing restarts it
             else schedAuto(n, t + cycleOf(n));
@@ -585,6 +655,6 @@ export function createSim(spec, { seed = 7 } = {}) {
             const acts = history.filter(a => a.tMs >= fromMs - 200 && a.tMs <= toMs);
             return { activations: acts, deflections: acts.flatMap(a => activationDeflections(a, spec.P)).sort((a, b) => a.tMs - b.tMs) };
         },
-        pace, cancelPacing, cardiovert,
+        pace, cancelPacing, cardiovert, adenosine,
     };
 }

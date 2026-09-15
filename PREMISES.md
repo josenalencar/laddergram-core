@@ -259,6 +259,26 @@ submission): every one of them was an error the previous rule produced.
 - The stimulator: HRA or RV apex, S1 × n then S2, S3, S4 (each from the stimulus before it), sensing the next beat
   at that site before the first stimulus, or continuous at S1 until stopped. Deterministic: the same reading,
   seed and actions give the same heart (fibrillation draws its cycles from the seed).
+- **The maneuvers answer as the textbooks say they should**, and MANEUVERS.md is the ledger — every arrhythmia
+  against every maneuver, the expected response with its source, the model's measured response, and the test
+  that holds it. The structure that makes the entrainment numbers come out: AVNRT closes in the compact node
+  above a lower common pathway (25 ms) to the His, so from the RV apex the circuit is reached through the
+  His–Purkinje system and that pathway (PPI − TCL > 115 ms, the His and the atrium activated in series, ΔHA > 0)
+  where in AVRT the ventricle is the circuit (PPI − TCL near 0, ΔHA < 0). Two waves entering a pathway from
+  opposite ends meet head-on and both die — a paced atrial wave meeting the retrograde limb it overtook, a PVC's
+  retrograde penetration meeting the descending wave, a sinus beat's wave down the slow pathway meeting the
+  compact node's invasion of it from below (why dual pathways give no double response, and why atypical AVNRT
+  does not echo from every sinus beat). The limbs of a circuit are fitted
+  gently (a quarter of their delay of decrement, ERP at half their recovery) so pacing 20–40 ms faster than the
+  tachycardia entrains it and it resumes; steeper curves made every circuit collapse in three beats. A concealed
+  pathway is entered by every atrial wave and left refractory for 80 ms, which is why sinus rhythm does not echo,
+  an atrial extrastimulus that lengthens the AH induces AVRT, and a PVC coupled well inside the cycle still
+  reaches the atrium through it. Adenosine blocks the node's pathways both ways for six seconds and slows the
+  sinus node; an automatic focus is suppressed by every beat that captures it (4 % per beat, up to a third — the
+  sinus node's recovery time after pacing, the pause before an atrial or junctional focus resumes) and never
+  broken; a re-entrant driver (flutter, VT) is broken by eight captures at a cycle under 92 % of its own. The
+  ventricle's refractory period shortens with the rate (65 % of the cycle, 180–250 ms), so a PVC can be coupled
+  early enough to be blocked in a pathway or to catch the node refractory — the terminations of Kusumoto 5.17–5.19.
 - A teaching model, not a patient: one atrium, one His, one ventricle; no ablation, no drugs, no atrial or
   ventricular fibrillation induced by pacing.
 - **The recorder is in colour on black, as a lab screen**: surface II (white) and V1 (green) written from the
