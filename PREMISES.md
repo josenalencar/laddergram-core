@@ -71,6 +71,11 @@ submission): every one of them was an error the previous rule produced.
   ventricles were activated.
 - Blocked and open ends get no dot.
 
+- **Dotted and bold lines are cosmetic** (2026-09-21, 1.26.0): an author's emphasis in a drawing by hand or a
+  restyled one, never a claim. Dashed keeps its meaning (concealed conduction, a PR too short for the node); a
+  dotted line is round dots 3.5 px apart so it cannot be read as dashed, and a bold line is a solid line 2.8 px wide.
+  The engine never draws either.
+
 ## 4. Mechanisms
 
 - Focus: an asterisk with no line entering it; successive beats are not linked. Reentry: a continuous line
@@ -322,3 +327,29 @@ submission): every one of them was an error the previous rule produced.
   is unchanged.
 - The live heart and the bars agree by test (`test/periods.test.mjs`): every block the live model produces between
   the first conducted wave and the last QRS falls inside a bar.
+
+
+## 9. Paced rhythms (`paced`) — 2026-09-21, 1.25.0
+
+- **Pacing is a fact of the tracing, stated on the marks** (`origin: 'paced'` on a P or a QRS), because a stimulus
+  artefact is seen, not inferred — and the detector has no spike detector (the digitizer removes spikes). The same
+  marks serve every reading; only the paced one draws the device.
+- **The mode is read from the marks, not chosen**: paced atria alone → AAI; paced ventricles alone → VVI; paced
+  atria and ventricles, or sensed P waves followed by paced QRS complexes at a constant delay (spread ≤ 50 ms) →
+  DDD. A P that happens to precede a VVI beat is not taken for tracking.
+- **A stimulus is its own glyph** — a spike with a zig-zag — never the asterisk (a focus the heart made) and never
+  a dot: a paced chamber is activated by the device. The paced ventricle is one vertical line through the V tier
+  from the stimulus at mid-band, with no QRS dot beside it (one mark per activation on the V line) and no
+  retrograde conduction claimed. A paced atrium starts at the top of the A tier with no sinus-node line.
+- **A P the paced ventricle follows is preempted, not blocked**: it enters the node and meets a ventricle already
+  activated — a dashed stub, as concealed conduction is drawn. P waves the device does not follow are blocked.
+- **The device's timing is shaded in its own colour** (blue, `kind: 'timing'`) and never mixed with the heart's
+  refractoriness: VRP in the V tier (VVI, DDD), PVARP in the A tier and the AV delay in the AV tier (DDD). The AV
+  delay and the lower rate are measured from the marks — the lower rate only where the device escapes (paced to
+  paced), never from the V–V cycle of atrial tracking, which is the sinus rate; PVARP and VRP are assumed unless
+  set, and the notes say so.
+- **Cautions, not corrections**: a paced QRS inside VRP (failure to sense, or a mark on the wrong beat), a paced QRS
+  sooner than the lower rate after a sensed one in VVI (undersensing), paced cycles more than 40 ms from a lower rate
+  that was set (hysteresis, rate response), sensed P waves inside PVARP (not tracked).
+- **Not modelled live**: the live heart refuses a paced reading by name (`LIVE_UNSUPPORTED`) instead of running it
+  as sinus rhythm; the EP view writes paced activations from the lead sites (RV apex, high right atrium).

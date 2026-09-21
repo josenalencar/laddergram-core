@@ -46,7 +46,7 @@ function recoveryOf(seq) {
  * The periods of a reading.
  * @param input   { beats, atrial, mechanism, params, tiers, durationMs } — as buildLadder takes it
  * @param o.ladder  the ladder already drawn from `input` (built here when absent)
- * @returns { periods: [{ id, tier, t0Ms, t1Ms, t1HiMs, kind: 'erp' | 'conceal', explains }], claims: [{ level, code, text }] }
+ * @returns { periods: [{ id, tier, t0Ms, t1Ms, t1HiMs, kind: 'erp' | 'conceal' | 'timing', explains }], claims: [{ level, code, text }] }
  *   t0Ms  the wave that makes the structure refractory enters it
  *   t1Ms  certainly refractory until here (the longest recovery that still blocked)
  *   t1HiMs  recovered by here (the shortest recovery that conducted); the span t1–t1Hi is hatched
@@ -65,6 +65,39 @@ export function ladderPeriods(input, { ladder = null } = {}) {
     const avTier = userTiers.includes('AV') ? 'AV' : userTiers.find(t => t === 'AVf' || t === 'AVs') ?? null;
     const byAtrial = (role) => new Map(L.paths.filter(p => p.role === role && p.atrialId != null).map(p => [p.atrialId, p]));
     const ectopy = L.events.some(e => e.role === 'focus-ventricular' || e.role === 'focus-his' || e.role === 'focus-junctional');
+
+    // ── a pacemaker: the device's own timing, not the heart's refractoriness ──
+    if (mech === 'paced') {
+        const pc = L.pacing;
+        if (!pc || !pc.mode) return out;
+        const vTimes = L.events.filter(e => e.tier === 'V' && (e.role === 'qrs' || e.role === 'stim-ventricular' || e.role === 'focus-ventricular' || e.role === 'focus-junctional'))
+            .map(e => ({ t: e.tMs, key: e.beatId })).sort((a, b) => a.t - b.t);
+        const timing = (id, tier, t0, len, explains) => out.periods.push({ id, tier, kind: 'timing', explains, t0Ms: t0, t1Ms: t0 + len, t1HiMs: t0 + len });
+        if (pc.mode !== 'AAI' && userTiers.includes('V')) for (const v of vTimes) timing(`vrp-${v.key}`, 'V', v.t, pc.vrpMs, v.key);
+        if (pc.mode === 'DDD') {
+            for (const v of vTimes) timing(`pvarp-${v.key}`, 'A', v.t, pc.pvarpMs, v.key);
+            // the AV delay: from the P the device sensed or paced to the paced QRS
+            const aOf = new Map(L.events.filter(e => e.tier === 'A' && e.atrialId != null && (e.role === 'p' || e.role === 'stim-atrial')).map(e => [e.atrialId, e.tMs]));
+            const vOf = new Map(L.events.filter(e => e.role === 'stim-ventricular').map(e => [e.beatId, e.tMs]));
+            const pairs = [...pc.tracked];
+            if (avTier) for (const { atrialId, beatId } of pairs) {
+                const t0 = aOf.get(atrialId), t1 = vOf.get(beatId);
+                if (t0 != null && t1 != null && t1 > t0) timing(`avi-${beatId}`, avTier, t0, t1 - t0, beatId);
+            }
+            // paced atrium followed by a paced ventricle: the same delay
+            for (const e of L.events.filter(x => x.role === 'stim-atrial')) {
+                const v = [...vOf].find(([, t]) => t > e.tMs && t - e.tMs <= 350 && !pairs.some(p => p.atrialId === e.atrialId));
+                if (v && avTier) timing(`avi-${v[0]}`, avTier, e.tMs, v[1] - e.tMs, v[0]);
+            }
+        }
+        claim('periods-paced', 'Pacemaker timing, not the heart\'s refractoriness: '
+            + [pc.mode !== 'AAI' ? `the ventricular refractory period (VRP ${pc.vrpMs} ms, V tier)` : null,
+               pc.mode === 'DDD' ? `the post-ventricular atrial refractory period (PVARP ${pc.pvarpMs} ms, A tier)` : null,
+               pc.mode === 'DDD' ? 'the AV delay (AV tier)' : null].filter(Boolean).join(', ')
+            + ' after each event. Refractory periods are assumed unless you set them.');
+        out.periods = out.periods.filter(p => [p.t0Ms, p.t1Ms].every(Number.isFinite) && p.t1Ms > p.t0Ms).sort((a, b) => a.t0Ms - b.t0Ms);
+        return out;
+    }
 
     if (mech === 'avb3') {
         claim('periods-none-complete', 'Complete AV block: no P conducts, so there is no recovery time to draw.');

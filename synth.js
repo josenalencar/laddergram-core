@@ -32,6 +32,7 @@ const P_SINUS = [[22, 12, 0.14, unit([0.25, 0.85, 0.45])], [53, 16, 0.1, unit([0
 // Retrograde P: low-septal exit, inferior → superior: a clear negative P in II/III/aVF (≈ −0.2 mV), positive in
 // aVR and V1 (the pseudo-r′). Larger and broader than a sinus P, as retrograde P waves are on real tracings.
 const P_RETRO = [[36, 18, 0.2, unit([-0.1, -0.95, 0.3])], [70, 14, 0.05, unit([-0.1, -0.95, 0.3])]];
+const SPIKE = [[0, 1.2, 1.1, unit([0.3, 0.8, 0.5])]];
 const P_PAC = [[34, 15, 0.1, unit([0.35, 0.6, 0.7])], [62, 16, 0.07, unit([0.7, 0.3, -0.4])]];
 const QRS = {
     normal: { width: 95, parts: [[14, 6, 0.18, unit([-0.4, 0.1, 0.9])], [44, 11, 1.5, unit([0.55, 0.75, -0.35])], [72, 9, 0.35, unit([-0.2, -0.5, -0.45])]],
@@ -62,6 +63,10 @@ const QRS = {
                                   [70, 16, 0.8, unit([-0.45, -0.72, 0.52])], [110, 16, 0.25, unit([0.35, 0.3, -0.55])]],
               t: [[1, 60, 0.3, unit([0.4, 0.7, -0.1])]] },
     // LV-origin VT: RBBB-like, left superior axis (dominant R in V1, negative II/III/aVF)
+    // Right-ventricular apical pacing: the wave spreads from the apex up and to the left — wide, LBBB-like in V1,
+    // negative in II, III and aVF (a superior axis), the T discordant
+    paced: { width: 160, parts: [[16, 9, 0.45, unit([0.45, -0.6, -0.6])], [60, 17, 1.3, unit([0.55, -0.7, -0.45])], [116, 19, 0.75, unit([0.5, -0.75, -0.4])]],
+             t: [[1, 60, 0.4, unit([-0.5, 0.7, 0.5])]] },
     vt: { width: 165, parts: [[28, 11, 0.9, unit([-0.35, -0.7, 0.62])], [76, 18, 1.5, unit([-0.45, -0.72, 0.52])], [128, 18, 0.45, unit([0.35, 0.3, -0.55])]],
           t: [[1, 60, 0.45, unit([0.35, 0.7, -0.5])]] },
 };
@@ -96,6 +101,10 @@ export function synthesizeEcg(timeline, { fs = SYNTH_FS, seed = 7, name = 'synth
     const acc = { n, leads: Object.fromEntries(LEADS.map(l => [l, new Float32Array(n)])) };
     const rnd = lcg(seed);
     for (const p of timeline.P || []) addBumps(acc, fs, p.t, p.kind === 'retro' ? P_RETRO : p.kind === 'pac' ? P_PAC : P_SINUS);
+    // pacemaker stimuli: a spike 2 ms before the activation it starts (bipolar: small, narrow, in every lead)
+    for (const t of [...(timeline.P || []).filter(p => p.paced), ...(timeline.QRS || []).filter(q => q.paced)].map(x => x.t)) {
+        addBumps(acc, fs, t - 2, SPIKE);
+    }
     const Q = (timeline.QRS || []).slice().sort((a, b) => a.t - b.t);
     Q.forEach((q, i) => {
         const tpl = (q.morph === 'normal' && timeline.visibleOnset ? QRS.normalVisible : QRS[q.morph]) || QRS.normal;
@@ -359,6 +368,26 @@ export const SYNTH_SCENARIOS = [
           t = pac2 + 1000;
           while (t < DUR - 250) { push(t, 'sinus', 'normal'); t += pp; }
           return { durationMs: DUR, P, QRS: QRS.filter(q => q.t < DUR - 200), flutter: null, af: false };
+      } },
+    { id: 'vviChb', label: 'VVI pacing in complete AV block', expect: 'paced',
+      hint: 'Flag the paced QRS complexes as paced (the spike before each): the P waves march through, blocked.',
+      timeline: () => {
+          const P = [], QRS = [];
+          for (let t = 230; t < DUR - 150; t += 700) P.push({ t, kind: 'sinus' });
+          for (let t = 600; t < DUR - 250; t += 1000) QRS.push({ t, morph: 'paced', paced: true });
+          return { durationMs: DUR, P, QRS, flutter: null, af: false };
+      } },
+    { id: 'ddd', label: 'DDD pacing: atrial tracking, then both chambers paced', expect: 'paced',
+      hint: 'Each sensed P is followed by a paced QRS at the AV delay (160 ms); when the sinus slows, the atrium is paced too (lower rate 1000 ms).',
+      timeline: () => {
+          const P = [], QRS = [];
+          let t = 250;
+          for (let k = 0; k < 5; k++, t += 800) { P.push({ t, kind: 'sinus' }); QRS.push({ t: t + 160, morph: 'paced', paced: true }); }
+          // the sinus slows: the device paces the atrium one V–A interval (LRI − AV delay) after the last paced QRS
+          for (let v = QRS[QRS.length - 1].t; v + 840 + 160 < DUR - 250; v += 1000) {
+              P.push({ t: v + 840, kind: 'sinus', paced: true }); QRS.push({ t: v + 1000, morph: 'paced', paced: true });
+          }
+          return { durationMs: DUR, P, QRS, flutter: null, af: false };
       } },
 ];
 

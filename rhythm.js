@@ -152,6 +152,12 @@ export function plausibility(beats = [], atrial = [], params = null) {
     const exclude = (ids, why) => ids.forEach(id => { v[id].status = 'excluded'; v[id].reasons.push(why); });
     const caution = (ids, why) => ids.forEach(id => { if (v[id].status !== 'excluded') v[id].status = 'caution'; v[id].reasons.push(why); });
 
+    // Pacing is a fact of the tracing, stated on the marks: without a paced mark there is nothing for the paced
+    // reading to draw; with one, every other reading would draw the paced beats as the heart's own.
+    const pacedMarks = beats.filter(b => b && b.origin === 'paced').length + atrial.filter(a => a && a.origin === 'paced').length;
+    if (!pacedMarks) exclude(['paced'], 'no mark is flagged as paced (open the card of the P or QRS after a stimulus and flag it)');
+    else caution(MECHANISMS.map(x => x.id).filter(id => id !== 'paced'), `${pacedMarks} mark(s) flagged as paced: only the paced reading draws the device's stimuli`);
+
     if (m.nBeats < 2) return { rhythm: m, verdicts: v, summary: 'Mark at least two QRS onsets.' };
 
     // QRS width
@@ -240,6 +246,8 @@ export function suggestReading(beats = [], atrial = [], rhythm = {}, params = nu
     const pick = (ids, reason) => { const id = ids.find(ok); return id ? { id, reason } : null; };
     const flutterLike = m.relation !== 'none' && m.nP >= 3 && m.ppCV != null && m.ppCV <= 0.1 && m.PP >= 160 && m.PP <= 350;
     let s = null;
+    const paced = beats.some(b => b && b.origin === 'paced') || atrial.some(a => a && a.origin === 'paced');
+    if (paced) return pick(['paced'], 'marks flagged as paced: a paced rhythm') ?? { id: 'avnodal', reason: 'default reading' };
     // an automatic AF call (the viewer's gate) yields to ectopy, a bigeminal pattern or 1:1 P waves
     if (rhythm.afib && !m.afVeto) s = pick(['afib'], 'irregularly irregular RR without organised P — detected automatically');
     else if (m.tachy && m.wide) s = pick(['vt'], 'wide-QRS tachycardia — VT until proven otherwise');

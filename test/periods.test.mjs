@@ -35,6 +35,10 @@ section('every scenario × every mechanism: well-formed, and every bar explains 
         n++;
         const L = buildLadder(input);
         for (const p of r.periods) {
+            if (p.kind === 'timing') {                   // a device's timing: it explains no block, and is only the paced reading's
+                if (mech !== 'paced' || !(p.t1Ms > p.t0Ms)) bad.push(`${sc.id}/${mech} ${p.id}`);
+                continue;
+            }
             if (![p.t0Ms, p.t1Ms, p.t1HiMs].every(Number.isFinite) || !(p.t1Ms > p.t0Ms) || p.t1HiMs < p.t1Ms) bad.push(`${sc.id}/${mech} ${p.id}`);
             // the block it explains: a P blocked in the node (or below the His) that arrives inside the bar
             const blocked = L.paths.find(q => q.terminal === 'block' && q.atrialId === p.explains && (q.role === 'av-block' || q.role === 'his-block'));
@@ -72,6 +76,20 @@ section('what is drawn, reading by reading');
     const sinus = ladderPeriods(reading('sinus', 'avnodal'));
     ok('sinus rhythm with every P conducted: nothing to explain, nothing drawn', !sinus.periods.length && !sinus.claims.length);
     ok('cleanPeriods keeps { show: true } and drops anything else', cleanPeriods({ show: true })?.show === true && cleanPeriods({ show: 'yes' }) === null && cleanPeriods(null) === null);
+}
+
+section('a pacemaker: its timing, not refractoriness');
+{
+    const vvi = ladderPeriods(reading('vviChb', 'paced'));
+    ok('VVI: a VRP bar in the V tier after each ventricular event, nothing else', vvi.periods.length > 0 && vvi.periods.every(p => p.kind === 'timing' && p.tier === 'V' && p.t1Ms - p.t0Ms === 250));
+    ok('… and a sentence that it is the device\'s timing', vvi.claims.some(c => c.code === 'periods-paced' && /VRP 250/.test(c.text) && !/PVARP/.test(c.text)));
+    const ddd = ladderPeriods(reading('ddd', 'paced'));
+    const tiers = new Set(ddd.periods.map(p => p.tier));
+    ok('DDD: VRP (V), PVARP (A) and the AV delay (AV)', tiers.has('V') && tiers.has('A') && tiers.has('AV'));
+    const avi = ddd.periods.filter(p => p.tier === 'AV');
+    ok('… the AV delay is 160 ms, tracked and paced alike', avi.length >= 8 && avi.every(p => Math.abs(p.t1Ms - p.t0Ms - 160) <= 1), avi.map(p => p.t1Ms - p.t0Ms).join(','));
+    const none = ladderPeriods(reading('sinus', 'paced'));
+    ok('no paced mark: no timing drawn', !none.periods.length);
 }
 
 section('the live heart blocks where the bars are (epsim.js models the same recovery)');

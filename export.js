@@ -185,7 +185,7 @@ export function toLineStyle(ladder) {
     const onsetAtOrBefore = (t) => { let best = null; for (const x of aOnsets) if (x <= t + 0.6) best = x; return best ?? t; };
     // ventricular onsets per beat (the QRS dot; for a pure focus, its asterisk)
     const qOn = new Map();
-    for (const e of ladder.events) if (e.tier === last && e.role === 'focus-ventricular' && e.beatId != null) qOn.set(e.beatId, e.tMs);
+    for (const e of ladder.events) if (e.tier === last && (e.role === 'focus-ventricular' || e.role === 'stim-ventricular') && e.beatId != null) qOn.set(e.beatId, e.tMs);
     for (const e of ladder.events) if (e.tier === last && e.role === 'qrs' && e.beatId != null) qOn.set(e.beatId, e.tMs);
     const onVLine = (q) => q.tier === last || (q.tier === aboveV && q.frac === 1);
 
@@ -299,13 +299,14 @@ export function layoutLadder(ladder, o) {
         const found = byXY.get(k);
         if (found) {
             if (meta.asterisk) found.pointStyle = 'asterisk';
+            if (meta.stim) found.pointStyle = 'stim';
             if (meta.measured) found.inferred = false;
             if (meta.timeHandle && !found.timeHandle) found.timeHandle = meta.timeHandle;
             if (meta.fromEvent && !found.fromEvent) { found.key = meta.key; found.role = meta.role; found.fromEvent = true; }
             return found.id;
         }
         const pt = { id: pid(points.length), x, y, lineId: lineIdOfLevel(lv), type: 'point',
-                     ...(meta.asterisk ? { pointStyle: 'asterisk' } : {}), origin: 'engine',
+                     ...(meta.asterisk ? { pointStyle: 'asterisk' } : meta.stim ? { pointStyle: 'stim' } : {}), origin: 'engine',
                      ...(meta.timeHandle ? { timeHandle: meta.timeHandle } : {}),
                      key: meta.key, role: meta.role, inferred: !meta.measured, fromEvent: !!meta.fromEvent };
         points.push(pt);
@@ -317,7 +318,7 @@ export function layoutLadder(ladder, o) {
     // Events first, so a point that is also an event carries the event's key and role (handles use them).
     for (const e of ladder.events) {
         if (e.style === 'none' || !inWindow(e.tMs)) continue;
-        pointAt(e.tMs, level(e), { asterisk: e.style === 'asterisk', measured: measured(e), key: e.key, role: e.role, fromEvent: true,
+        pointAt(e.tMs, level(e), { asterisk: e.style === 'asterisk', stim: e.style === 'stim', measured: measured(e), key: e.key, role: e.role, fromEvent: true,
                                    timeHandle: e.timeHandle });
     }
     for (const p of ladder.paths) {
@@ -432,8 +433,9 @@ export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands',
         out.marks = {
             beats: (marks.beats || []).map(b => ({ id: String(b.id), qrsOnMs: b.qrsOnMs, qrsOffMs: b.qrsOffMs ?? b.qrsOnMs + 95,
                                                    quality: b.quality === 'pvc' ? 'pvc' : 'normal', source: b.source === 'user' ? 'user' : 'imported',
-                                                   ...(b.origin === 'capture' || b.origin === 'fusion' ? { origin: b.origin } : {}) })),
-            atrial: (marks.atrial || []).map(a => ({ id: String(a.id), tMs: a.tMs, source: a.source === 'user' ? 'user' : 'imported' })),
+                                                   ...(b.origin === 'capture' || b.origin === 'fusion' || b.origin === 'paced' ? { origin: b.origin } : {}) })),
+            atrial: (marks.atrial || []).map(a => ({ id: String(a.id), tMs: a.tMs, source: a.source === 'user' ? 'user' : 'imported',
+                                                     ...(a.origin === 'paced' ? { origin: 'paced' } : {}) })),
             durationMs: tMaxMs - tMinMs,
         };
         // A recipe per ladder, so the editor rebuilds it from the marks instead of freezing the drawing.

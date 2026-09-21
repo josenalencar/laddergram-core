@@ -117,7 +117,16 @@ const AP_VENT = { leftLateral: 'preLeftLateral', septal: 'preSeptal', rightLater
  *          far a paced site is from the pathway's end)
  *   coupler { node, to, coupling, every, ownTag } — fires `node` `coupling` ms after every `every`-th activation of `to`
  */
+/**
+ * Readings the live heart does not model. A pacemaker's timing (tracking, PVARP, rate) is the device's, not the
+ * heart's: the live pacer here is a single-chamber stimulator, so a paced reading is refused rather than run
+ * as sinus rhythm.
+ */
+export const LIVE_UNSUPPORTED = Object.freeze({ paced: 'device timing (tracking, PVARP, the lower rate) is not modelled in the live heart' });
+export const liveSupported = (mechanism) => !(mechanism in LIVE_UNSUPPORTED);
+
 export function fromReading(input, ep = DEFAULT_EP) {
+    if (!liveSupported(input.mechanism)) throw new Error(`Live heart: ${LIVE_UNSUPPORTED[input.mechanism]}.`);
     const opts = cleanEp(ep) ?? cleanEp({});
     const P = resolveParams(input.params);
     const beats = (input.beats || []).slice().sort((a, b) => a.qrsOnMs - b.qrsOnMs);

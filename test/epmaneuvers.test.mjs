@@ -223,7 +223,9 @@ section('every reading under every mechanism, marks jittered: a heart that runs,
     // The readings come from real tracings once the marks and the mechanism are settled; whatever the marks, the
     // network must build, keep time, answer the stimulator and the drugs, and never throw or explode.
     const { SYNTH_SCENARIOS } = await import('../synth.js');
-    const { MECHANISMS } = await import('../engine.js');
+    const { MECHANISMS: ALL } = await import('../engine.js');
+    const { liveSupported } = await import('../epsim.js');
+    const MECHANISMS = ALL.filter(m => liveSupported(m.id));      // a paced reading is refused by name (below)
     const lcg = (seed) => { let x = seed >>> 0; return () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; };
     let built = 0, bad = [];
     for (const sc of SYNTH_SCENARIOS) {
@@ -259,6 +261,16 @@ section('every reading under every mechanism, marks jittered: a heart that runs,
         }
     }
     ok(`${built} hearts built and driven (${SYNTH_SCENARIOS.length} readings × ${MECHANISMS.length} mechanisms × exact and jittered marks), none threw or ran away`, bad.length === 0, bad.slice(0, 6).join(' | '));
+}
+
+section('a reading the live heart does not model is refused by name, not run as sinus rhythm');
+{
+    const rec = makeExample('sinus');
+    const { beats, atrial } = figureMarkers(rec);
+    let msg = '';
+    try { fromReading({ beats: beats.map(b => ({ ...b, origin: 'paced' })), atrial, mechanism: 'paced', durationMs: rec.metadata.truth.durationMs }); }
+    catch (e) { msg = e.message; }
+    ok('a paced reading throws, and says why', /device timing/.test(msg), msg);
 }
 
 console.log(`\n${pass} ok, ${fail} fail`);

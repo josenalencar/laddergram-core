@@ -10,8 +10,8 @@ const ok = (name, cond) => cond ? (pass++, console.log('  ok   ' + name)) : (fai
 const W = { normal: 90, pvc: 150, wide: 150, capture: 90, fusion: 120 };
 function truthMarks(id) {
     const tr = makeExample(id).metadata.truth;
-    const beats = tr.QRS.map((q, i) => ({ id: 'b' + i, qrsOnMs: q.t, qrsOffMs: q.t + (W[q.morph] ?? 140), quality: q.morph === 'pvc' ? 'pvc' : 'normal' }));
-    let atrial = tr.P.map((p, i) => ({ id: 'a' + i, tMs: p.t }));
+    const beats = tr.QRS.map((q, i) => ({ id: 'b' + i, qrsOnMs: q.t, qrsOffMs: q.t + (W[q.morph] ?? 140), quality: q.morph === 'pvc' ? 'pvc' : 'normal', ...(q.paced ? { origin: 'paced' } : {}) }));
+    let atrial = tr.P.map((p, i) => ({ id: 'a' + i, tMs: p.t, ...(p.paced ? { origin: 'paced' } : {}) }));
     // flutter: the F-wave onsets are the atrial marks
     if (tr.flutter) { atrial = []; for (let t = tr.flutter.phaseMs; t < tr.durationMs; t += tr.flutter.cycleMs) atrial.push({ id: 'f' + atrial.length, tMs: t }); }
     return { tr, beats, atrial };
@@ -125,7 +125,9 @@ for (const sc of SYNTH_SCENARIOS) {
     const s = suggestReading(m.beats, m.atrial, rec.metadata.truth.af ? { afib: true } : {});
     // flutter 2:1 shows one F wave per QRS to the detector (read as AT); the ambiguous strips: any non-excluded reading
     const okSet = { ...AMBIGUOUS, flutter21: ['flutter', 'at'] }[sc.id];
-    if (okSet) ok(`${sc.id} (detector): ${s.id} is one of ${okSet.join('/')}`, okSet.includes(s.id));
+    // the detector cannot see pacing (no spike detector): it never flags a mark paced, so never suggests it
+    if (sc.expect === 'paced') ok(`${sc.id} (detector): paced is not suggested without paced marks (${s.id})`, s.id !== 'paced');
+    else if (okSet) ok(`${sc.id} (detector): ${s.id} is one of ${okSet.join('/')}`, okSet.includes(s.id));
     else ok(`${sc.id} (detector): suggested ${s.id} (expected ${sc.expect})`, s.id === sc.expect);
 }
 

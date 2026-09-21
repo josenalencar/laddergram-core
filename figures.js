@@ -11,7 +11,7 @@
 import { makeExample } from './synth.js';
 import { resolveParams, suggestVA } from './engine.js';
 
-const WIDTH = { normal: 95, ivcd: 110, lbbb: 160, rbbb: 140, vt: 165, pvc: 170, fusion: 125 };
+const WIDTH = { normal: 95, ivcd: 110, lbbb: 160, rbbb: 140, vt: 165, pvc: 170, fusion: 125, paced: 160 };
 // Intracardiac brackets on figures (PREMISES.md §5): one beat, and only the interval that tells the panels apart.
 
 // Figure 1 is drawn in the second ladder convention ("Dots on lines", the style of the original hand-made
@@ -104,10 +104,10 @@ export function figureMarkers(rec) {
         const w = WIDTH[q.morph] ?? 95;
         return { id: 'b' + i, qrsOnMs: q.t, qrsOffMs: q.t + w, rPeakMs: q.t + 40, qrsWidthMs: w,
                  quality: 'normal', conduction: null, source: 'user',
-                 origin: q.capture ? 'capture' : q.fusion ? 'fusion' : undefined,
+                 origin: q.capture ? 'capture' : q.fusion ? 'fusion' : q.paced ? 'paced' : undefined,
                  ...(q.focusAt != null ? { focusDelayMs: q.focusAt - q.t } : {}) };
     });
-    const atrial = tr.P.map((p, i) => ({ id: 'a' + i, tMs: p.t, source: 'user' }));
+    const atrial = tr.P.map((p, i) => ({ id: 'a' + i, tMs: p.t, source: 'user', ...(p.paced ? { origin: 'paced' } : {}) }));
     return { beats, atrial };
 }
 

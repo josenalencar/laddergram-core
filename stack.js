@@ -17,7 +17,7 @@ export const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export const SHORT = Object.freeze({
     avnodal: 'Sinus / AV conduction', avb3: 'Complete AV block', avnrt: 'AVNRT', avrt: 'Orthodromic AVRT',
     pvc: 'Sinus + ectopy', vt: 'Ventricular tachycardia', afib: 'Atrial fibrillation', flutter: 'Atrial flutter',
-    at: 'Atrial tachycardia', jt: 'Junctional tachycardia', avrtAnti: 'Antidromic AVRT', hisExtra: 'Concealed His extrasystoles', pjrt: 'PJRT',
+    at: 'Atrial tachycardia', jt: 'Junctional tachycardia', avrtAnti: 'Antidromic AVRT', hisExtra: 'Concealed His extrasystoles', pjrt: 'PJRT', paced: 'Paced rhythm',
 });
 
 /** How many caption lines to reserve under a ladder: one per ~140 characters, at most three. */

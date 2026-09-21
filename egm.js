@@ -264,6 +264,8 @@ export function ladderActivations(L, { apSite = 'leftLateral', vOrigin = 'RV', a
         const base = { tMs: e.tMs, beatId: e.beatId ?? null, atrialId: e.atrialId ?? null };
         if (e.role === 'p' || e.role === 'p-edge') acts.push({ kind: 'A', origin: 'sinus', ...base });
         else if (e.role === 'focus-atrial') acts.push({ kind: 'A', origin: atSite, ...base });
+        // a paced atrium: the lead in the right atrial appendage, so the high right atrium first
+        else if (e.role === 'stim-atrial') acts.push({ kind: 'A', origin: 'highRA', paced: true, ...base });
         else if (e.role === 'F') acts.push({ kind: 'A', origin: 'flutter', ...base });
         else if (e.role === 'f') acts.push({ kind: 'f', n: nf++, ...base });
         else if (e.role === 'p-retro') {
@@ -302,6 +304,8 @@ export function ladderActivations(L, { apSite = 'leftLateral', vOrigin = 'RV', a
     // a ventricular focus with no conducted QRS of its own (a fusion beat has both: it is drawn conducted)
     for (const e of L.events) {
         if (e.role === 'focus-ventricular' && !conducted.has(e.beatId)) acts.push({ kind: 'V', tMs: e.tMs, origin: vOrigin, beatId: e.beatId, atrialId: null });
+        // a paced ventricle: the lead at the right ventricular apex
+        if (e.role === 'stim-ventricular') acts.push({ kind: 'V', tMs: e.tMs, origin: 'RV', paced: true, beatId: e.beatId, atrialId: null });
     }
     return acts.sort((a, b) => a.tMs - b.tMs);
 }

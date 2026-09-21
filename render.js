@@ -62,6 +62,8 @@ export const COLORS = Object.freeze({
     PERIOD_ERP_EDGE: 'rgba(180, 83, 9, 0.55)',   // … their edge and the hatching of the span in which they recover
     PERIOD_CONCEAL: 'rgba(109, 40, 217, 0.16)',  // left refractory by concealed conduction
     PERIOD_CONCEAL_EDGE: 'rgba(91, 33, 182, 0.50)',
+    PERIOD_TIMING: 'rgba(37, 99, 235, 0.13)',      // a pacemaker's own timing (AV delay, PVARP, VRP)
+    PERIOD_TIMING_EDGE: 'rgba(29, 78, 216, 0.50)',
 });
 const INK = COLORS.INK, MUTED = COLORS.MUTED, COL_P = COLORS.P, COL_Q = COLORS.Q, COL_SEL = COLORS.SEL, BRACKET_COL = COLORS.BRACKET;
 const GRID_FINE = COLORS.GRID_FINE, GRID_BOLD = COLORS.GRID_BOLD;
@@ -387,8 +389,10 @@ export function drawPathPx(ctx, p, labelled) {
     const nx = -dy / len, ny = dx / len;
     const color = highlight ? COL_SEL : (p.color || INK);
     ctx.strokeStyle = color; ctx.fillStyle = color;
-    ctx.lineWidth = highlight ? 2.4 : 1.6; ctx.lineCap = 'round';
-    ctx.setLineDash(p.style === 'dashed' ? [4, 3] : []);
+    // 'dotted' and 'bold' are the author's emphasis, nothing more (PREMISES §3): dotted is round dots, clearly
+    // unlike the dash that means concealed conduction; bold is a heavier solid line
+    ctx.lineWidth = highlight ? 2.4 : p.style === 'bold' ? 2.8 : 1.6; ctx.lineCap = 'round';
+    ctx.setLineDash(p.style === 'dashed' ? [4, 3] : p.style === 'dotted' ? [0.1, 3.4] : []);
     const curved = p.style !== 'wavy' && Math.abs(p.curve || 0) > 0.01;
     const cx = (sx + ex) / 2 + nx * (p.curve || 0), cy = (sy + ey) / 2 + ny * (p.curve || 0);
     ctx.beginPath();
@@ -486,14 +490,28 @@ export function drawAsterisk(ctx, x, y, r = 5.5) {
 /**
  * One event, in pixels: a dot (hollow when the tracing fixes it — a measured onset — filled when it is
  * inferred), an asterisk for a focus, or nothing.
- * @param e  { x, y, style: 'dot'|'asterisk'|'none', hollow, highlight }
+ * @param e  { x, y, style: 'dot'|'asterisk'|'stim'|'none', hollow, highlight }
  */
+/**
+ * A pacemaker stimulus: a spike with a zig-zag, centred on the moment it fired — not a dot (an activation
+ * the heart made) and not an asterisk (a focus). PREMISES §9.
+ */
+export function drawStimulus(ctx, x, y, h = 7) {
+    ctx.save();
+    ctx.lineWidth = 1.6; ctx.lineJoin = 'miter'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x + 2.5, y - h); ctx.lineTo(x - 2.5, y + 0.8); ctx.lineTo(x + 2.5, y - 0.8); ctx.lineTo(x - 2.5, y + h);
+    ctx.stroke();
+    ctx.restore();
+}
+
 export function drawEventPx(ctx, e) {
     if (e.style === 'none') return;
     // A dot may carry its own colour, as a path does. Selection still wins: what is highlighted has to
     // look highlighted whatever colour the reader gave it.
     ctx.strokeStyle = ctx.fillStyle = e.highlight ? COL_SEL : (e.color || INK);
     if (e.style === 'asterisk') { drawAsterisk(ctx, e.x, e.y); return; }
+    if (e.style === 'stim') { drawStimulus(ctx, e.x, e.y); return; }
     ctx.beginPath(); ctx.arc(e.x, e.y, 3.3, 0, Math.PI * 2);
     if (e.hollow) { ctx.fillStyle = COLORS.HOLLOW; ctx.fill(); ctx.lineWidth = 1.6; ctx.stroke(); }
     else ctx.fill();
@@ -604,7 +622,7 @@ export function resolveGroup(ladder, view, layout, g, { selected = null, visible
         if (e.style === 'none' || !visible(e.tMs) || !G.bands[e.tier]) continue;
         events.push({
             x: view.xOf(e.tMs), y: yOf(layout, e.tier, e.frac, g),
-            style: e.style === 'asterisk' ? 'asterisk' : 'dot',
+            style: e.style === 'asterisk' || e.style === 'stim' ? e.style : 'dot',
             // Open = measured on the tracing, filled = inferred. The engine says which by where the mark
             // came from; a reader restyling one dot says it outright, and a colour travels the same way.
             hollow: e.hollow != null ? !!e.hollow : e.source === 'user',
@@ -684,9 +702,8 @@ export function drawPeriodsPx(ctx, list) {
     if (!list?.length) return;
     ctx.save();
     for (const r of list) {
-        const conceal = r.kind === 'conceal';
-        const fill = conceal ? COLORS.PERIOD_CONCEAL : COLORS.PERIOD_ERP;
-        const edge = conceal ? COLORS.PERIOD_CONCEAL_EDGE : COLORS.PERIOD_ERP_EDGE;
+        const fill = r.kind === 'conceal' ? COLORS.PERIOD_CONCEAL : r.kind === 'timing' ? COLORS.PERIOD_TIMING : COLORS.PERIOD_ERP;
+        const edge = r.kind === 'conceal' ? COLORS.PERIOD_CONCEAL_EDGE : r.kind === 'timing' ? COLORS.PERIOD_TIMING_EDGE : COLORS.PERIOD_ERP_EDGE;
         const h = r.y1 - r.y0;
         ctx.fillStyle = fill;
         ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, h);

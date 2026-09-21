@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.24.0';
+export const ENGINE_VERSION = '1.26.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -132,6 +132,10 @@ export const DEFAULT_PARAMS = Object.freeze({
     apAnteMs: 50,      // antidromic AVRT: atrial end of the pathway → delta wave (a Kent pathway conducts fast)
     vhMs: 80,          // antidromic AVRT: QRS onset → retrograde His — the slow part: ventricular muscle back to the His–Purkinje system
     hPrimeLead: 70,    // concealed His extrasystole: H′ this long before the P reaches the node
+    LRI: null,         // pacing: lower rate interval; null = from the paced cycles you marked
+    AVI: null,         // pacing: AV delay (sensed or paced P → paced QRS); null = from your marks
+    PVARP: 250,        // pacing: post-ventricular atrial refractory period (the device ignores a P inside it)
+    VRP: 250,          // pacing: ventricular refractory period (the device ignores a QRS inside it)
 });
 
 /** Labels/units for the params panel. `adv` = hidden under "advanced". */
@@ -158,6 +162,10 @@ export const PARAM_INFO = {
     apAnteMs: { kind: 'assumed', label: 'Pathway conduction (atrial end → delta wave)', unit: 'ms', what: 'atrial end of the pathway → delta wave: the pre-excited descent' },
     vhMs: { kind: 'assumed', needsTier: ['His'], label: 'QRS onset → retrograde His (through ventricular muscle)', unit: 'ms', adv: true, what: 'QRS onset → retrograde His: the slow return through ventricular muscle' },
     hPrimeLead: { kind: 'assumed', label: 'H′ before the P reaches the node', unit: 'ms', what: 'how long before the P reaches the node the hidden H′ fires' },
+    LRI: { kind: 'clinical', label: 'Lower rate interval (empty = from your marks)', unit: 'ms', what: 'the longest the device waits before it paces: the paced-to-paced cycle' },
+    AVI: { kind: 'clinical', label: 'AV delay (empty = from your marks)', unit: 'ms', what: 'P (sensed or paced) → paced QRS in a dual-chamber device' },
+    PVARP: { kind: 'assumed', label: 'PVARP', unit: 'ms', normal: [200, 350], what: 'after each ventricular event the device ignores atrial activity this long (it is not tracked)' },
+    VRP: { kind: 'assumed', label: 'VRP', unit: 'ms', normal: [200, 300], what: 'after each ventricular event the device ignores ventricular activity this long' },
 };
 
 const ALWAYS = ['SACT', 'PA', 'HV', 'AHmin', 'PRmin', 'PRmax', 'wideQrsMs', 'concealDepth', 'blockDepth'];
@@ -175,6 +183,7 @@ export const MECHANISMS = [
     { id: 'vt', label: 'Ventricular tachycardia (AV dissociation, capture beats)', params: [...ALWAYS, 'ectopicVA', 'vExit'] },
     { id: 'afib', label: 'Atrial fibrillation', params: [...ALWAYS, 'fibMeanMs'] },
     { id: 'flutter', label: 'Atrial flutter', params: [...ALWAYS, 'fWaveMs', 'fPhaseMs'] },
+    { id: 'paced', label: 'Paced rhythm (VVI, AAI, DDD — from the marks you flag as paced)', params: [...ALWAYS, 'LRI', 'AVI', 'PVARP', 'VRP'], needs: 'pacedMarks' },
 ];
 
 export const AP_COLOR = '#b45309';
@@ -1226,6 +1235,122 @@ function buildHisExtra(B, input) {
     if (!T.hasHis) B.note('Add the His tier to draw H′ where it arises.', 'caution', 'tier-missing');
 }
 
+// ─── pacing ─────────────────────────────────────────────────────────────────
+
+/** A mark the reader says the device made (the stimulus artefact before it). */
+export const isPacedMark = (m) => !!m && m.origin === 'paced';
+/** How far before a paced QRS a P is looked for as the one the device tracked. */
+const AVI_WINDOW_MS = 350;
+
+/**
+ * A pacemaker stimulus: its own glyph (a spike), never the focus asterisk — a paced chamber is not a focus
+ * the heart made, and a figure has to tell the two apart (PREMISES §9).
+ */
+function stimulus(B, tier, t, frac, o = {}) {
+    return B.ev(tier, t, frac, { style: 'stim', role: tier === 'A' ? 'stim-atrial' : 'stim-ventricular', ...o });
+}
+
+/**
+ * Paced rhythm. What is paced is declared on the marks (origin: 'paced'); the mode is read from them:
+ *   AAI  paced atria, the ventricles conducted;
+ *   VVI  paced ventricles, the atria on their own (conducted, blocked or dissociated);
+ *   DDD  paced atria and ventricles, or sensed P waves the ventricle follows at a constant AV delay (VAT).
+ * A P the paced ventricle follows is not blocked: it enters the node and meets a ventricle already
+ * activated — drawn as a dashed, preempted stub. The device's timing (AV delay, PVARP, VRP) is shaded by
+ * periods.js; the lower rate interval is stated.
+ */
+function buildPaced(B, input) {
+    const { P, T } = B;
+    const beats = input.beats.slice().sort(byQ);
+    const atrial = input.atrial.slice().sort(byT);
+    const native = beats.filter(b => !isPacedMark(b)), vPaced = beats.filter(isPacedMark);
+    const aPacedN = atrial.filter(isPacedMark).length;
+    const { pairs } = pairAtrialToBeats(native, atrial, P);
+    const beatOfA = new Map([...pairs].map(([bId, aId]) => [aId, bId]));
+    const bById = new Map(beats.map(b => [b.id, b]));
+
+    // The P each paced QRS follows, if the device is tracking: the last free P in the window before it, and
+    // only when those delays agree — a P that merely happens to precede a VVI beat is not tracked.
+    const window = P.AVI != null ? P.AVI + 60 : AVI_WINDOW_MS;
+    let trackOf = new Map();                                   // atrialId → paced beat
+    for (const b of vPaced) {
+        const a = atrial.filter(x => !beatOfA.has(x.id) && !trackOf.has(x.id) && x.tMs <= b.qrsOnMs - 40 && x.tMs >= b.qrsOnMs - window).pop();
+        if (a) trackOf.set(a.id, b);
+    }
+    const avis = [...trackOf].map(([aId, b]) => b.qrsOnMs - atrial.find(x => x.id === aId).tMs);
+    const aviSpread = avis.length ? Math.max(...avis) - Math.min(...avis) : 0;
+    const tracking = avis.length >= 2 ? aviSpread <= 50 : avis.length === 1 && (vPaced.length === 1 || aPacedN > 0);
+    if (!tracking) trackOf = new Map();
+    const mode = aPacedN && (vPaced.length || tracking) ? 'DDD' : aPacedN ? 'AAI' : vPaced.length && tracking ? 'DDD' : vPaced.length ? 'VVI' : null;
+
+    for (const a of atrial) {
+        if (isPacedMark(a)) {
+            stimulus(B, 'A', a.tMs, 0, { atrialId: a.id, source: a.source || 'auto' });
+            B.seg(['A', a.tMs, 0], ['A', a.tMs, 1], { atrialId: a.id, role: 'atrium' });
+        } else sinusEntry(B, a);
+        const tIn = a.tMs;
+        if (beatOfA.has(a.id)) {
+            const b = bById.get(beatOfA.get(a.id));
+            avConduct(B, tIn, junctionTimes(B, b.qrsOnMs, b.params).tAvOut, { atrialId: a.id, beatId: b.id });
+        } else if (a.blockedAt === 'His') {
+            infraHisBlock(B, a, tIn, tIn + P.PA + 2 * P.AHmin);   // where the reader says it stopped
+        } else if (a.blockedAt === 'AV') {
+            avBlock(B, tIn, null, { atrialId: a.id });
+        } else if (trackOf.has(a.id)) {
+            // preempted: the paced ventricle got there first
+            B.seg([T.av, tIn, 0], [T.av, tIn + P.AHmin, P.blockDepth], { style: 'dashed', terminal: 'block', atrialId: a.id, beatId: trackOf.get(a.id).id, role: 'av-preempted' });
+        } else avBlock(B, tIn, null, { atrialId: a.id });
+    }
+    for (const b of beats) {
+        if (isPacedMark(b)) {
+            // the whole ventricle, from the lead: up and down from the stimulus, no retrograde conduction claimed
+            stimulus(B, 'V', b.qrsOnMs, 0.5, { beatId: b.id, source: b.source || 'auto' });
+            B.seg(['V', b.qrsOnMs, 0.5], ['V', b.qrsOnMs, 1], { beatId: b.id, role: 'ventricle-paced' });
+            B.seg(['V', b.qrsOnMs, 0.5], ['V', b.qrsOnMs, 0], { beatId: b.id, role: 'ventricle-paced' });
+        } else if (pairs.has(b.id)) hisAndV(B, b);
+        else if (isEctopicLike(b, P)) ventricularFocus(B, b, null, { retro: false });
+        else junctionalFocus(B, b, null, { retro: false });
+    }
+    B.L.intervals = measureIntervals(native, atrial, pairs, P);
+
+    // The device's timing, as far as the marks show it.
+    const vEvents = beats.map(b => b.qrsOnMs);
+    const cyclesOf = (list) => { const d = []; for (let i = 1; i < list.length; i++) if (isPacedMark(list[i]) && isPacedMark(list[i - 1])) d.push((list[i].tMs ?? list[i].qrsOnMs) - (list[i - 1].tMs ?? list[i - 1].qrsOnMs)); return d; };
+    // the paced-to-paced cycle is the lower rate only where the device is escaping: under atrial tracking the
+    // ventricle follows the sinus rate
+    const rateChamber = aPacedN ? atrial : beats;
+    const lriMeasured = mode === 'DDD' && !aPacedN ? null : median(cyclesOf(rateChamber));
+    const lri = P.LRI ?? lriMeasured;
+    const avi = P.AVI ?? (avis.length && tracking ? median(avis) : null);
+    B.L.pacing = { mode, lriMs: lri != null ? r1(lri) : null, aviMs: avi != null ? r1(avi) : null, pvarpMs: P.PVARP, vrpMs: P.VRP,
+                   tracked: [...trackOf].map(([aId, b]) => ({ atrialId: aId, beatId: b.id })) };
+
+    if (!mode) {
+        B.note('No mark is flagged as paced: open the card of a paced P or QRS (the one after the stimulus) and flag it as paced.', 'caution', 'paced-none');
+        return;
+    }
+    const what = { AAI: 'atrial pacing, the ventricles conducted', VVI: 'ventricular pacing, the atria on their own', DDD: aPacedN ? 'dual-chamber pacing' : 'the ventricle paced after each sensed P (atrial tracking)' }[mode];
+    B.note(`Pacemaker read from the marks: ${mode} — ${what}.${lri != null ? ` Lower rate interval ${Math.round(lri)} ms (${Math.round(60000 / lri)} /min)${P.LRI == null ? ', from the paced cycles' : ''}.` : ''}`
+        + `${avi != null && mode === 'DDD' ? ` AV delay ${Math.round(avi)} ms.` : ''}`
+        + `${mode === 'DDD' ? ` PVARP ${P.PVARP} ms and VRP ${P.VRP} ms are assumed.` : mode === 'VVI' ? ` VRP ${P.VRP} ms is assumed.` : ''}`, 'info', 'paced-mode');
+    if (P.LRI != null && lriMeasured != null && Math.abs(lriMeasured - P.LRI) > 40) {
+        B.note(`The paced cycles on the strip (${Math.round(lriMeasured)} ms) differ from the lower rate interval set (${P.LRI} ms) by more than 40 ms: rate hysteresis, rate response, or a different programmed rate?`, 'caution', 'paced-lri');
+    }
+    // a paced QRS the device should not have delivered
+    for (let i = 1; i < beats.length; i++) {
+        const b = beats[i], dt = b.qrsOnMs - vEvents[i - 1];
+        if (!isPacedMark(b)) continue;
+        if (dt < P.VRP) B.note(`A paced QRS ${Math.round(dt)} ms after the previous QRS, inside the ventricular refractory period: failure to sense, or a mark on the wrong beat?`, 'caution', 'paced-inside-vrp');
+        else if (!isPacedMark(beats[i - 1]) && lri != null && mode === 'VVI' && dt < lri - 40) B.note(`A paced QRS ${Math.round(dt)} ms after a sensed QRS, sooner than the lower rate interval (${Math.round(lri)} ms): undersensing?`, 'caution', 'paced-undersense');
+    }
+    // sensed P waves the device ignored because they fell in PVARP
+    if (mode === 'DDD') {
+        const ignored = atrial.filter(a => !isPacedMark(a) && !trackOf.has(a.id) && !beatOfA.has(a.id)
+            && vEvents.some(q => a.tMs > q && a.tMs - q < P.PVARP));
+        if (ignored.length) B.note(`${ignored.length} sensed P wave(s) inside PVARP (${P.PVARP} ms after a QRS): not tracked by the device.`, 'info', 'paced-pvarp');
+    }
+}
+
 const RULES = {
     avnodal: (B, input) => buildAvNodal(B, input),
     pvc: (B, input) => buildAvNodal(B, input, { excludeWide: true }),
@@ -1240,6 +1365,7 @@ const RULES = {
     pjrt: (B, input) => buildAvrt(B, input, { pjrt: true }),
     afib: buildAfib,
     flutter: buildFlutter,
+    paced: buildPaced,
 };
 
 /** Notes about per-beat bundle-branch conduction, for every mechanism. */
