@@ -27,11 +27,11 @@ const AXIS = {
 
 // Wave templates: [dt from onset (ms), sigma (ms), amplitude (mV), vector].
 // P and QRS templates start where their marks are: in lead II every wave leaves the baseline (> 0.04 mV) within
-// ~5 ms of its onset mark, so PR/RP measured on a printed lead II agree with the intervals the marks give.
+// ~5 ms of its onset mark (the retrograde P within ~10 ms: a narrower one defeats the detector on digitized strips), so PR/RP measured on a printed lead II agree with the intervals the marks give.
 const P_SINUS = [[22, 12, 0.14, unit([0.25, 0.85, 0.45])], [53, 16, 0.1, unit([0.75, 0.45, -0.5])]];
 // Retrograde P: low-septal exit, inferior → superior: a clear negative P in II/III/aVF (≈ −0.2 mV), positive in
 // aVR and V1 (the pseudo-r′). Larger and broader than a sinus P, as retrograde P waves are on real tracings.
-const P_RETRO = [[30, 16, 0.2, unit([-0.1, -0.95, 0.3])], [64, 14, 0.05, unit([-0.1, -0.95, 0.3])]];
+const P_RETRO = [[36, 18, 0.2, unit([-0.1, -0.95, 0.3])], [70, 14, 0.05, unit([-0.1, -0.95, 0.3])]];
 const P_PAC = [[34, 15, 0.1, unit([0.35, 0.6, 0.7])], [62, 16, 0.07, unit([0.7, 0.3, -0.4])]];
 const QRS = {
     normal: { width: 95, parts: [[14, 6, 0.18, unit([-0.4, 0.1, 0.9])], [44, 11, 1.5, unit([0.55, 0.75, -0.35])], [72, 9, 0.35, unit([-0.2, -0.5, -0.45])]],
