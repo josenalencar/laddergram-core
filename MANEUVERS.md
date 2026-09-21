@@ -42,7 +42,7 @@ V-A-A-V: two atrial activations before the next V, an atrial tachycardia).
 |---|---|---|---|
 | atrial overdrive | 1:1 with AH lengthening, then Wenckebach at the AV block cycle length, normally 350–500 ms (Kusumoto 3.2–3.5, 4) | 1:1 at 400, Wenckebach from 380 (AVBCL 380) | epsim: atrial pacing at 400 / Wenckebach paced faster |
 | atrial S2 | AH lengthens as S2 shortens; below the AV nodal ERP an A without an H (Kusumoto 3.7–3.8, ERP ≈ 330 at 600); atrial ERP below that | S2 400 conducts longer than the drive, 320 longer still, 300 blocks in the node | epsim: the AV node under the stimulator |
-| ventricular overdrive | 1:1 retrograde, earliest A on the His catheter (concentric), then VA block at the VA block cycle length (Kusumoto 3.16–3.17) | 1:1 to 450, 2:1 from 400 (VABCL 450); every retrograde A over the fast pathway | epsim: ventricular pacing, retrograde over the fast pathway |
+| ventricular overdrive | 1:1 retrograde, earliest A on the His catheter (concentric), then VA block at the VA block cycle length (Kusumoto 3.16–3.17) | 1:1 to 450, 2:1 from 400 (VABCL 450–460; the drive scan finds 460); every retrograde A over the fast pathway | epsim: ventricular pacing, retrograde over the fast pathway |
 | Wenckebach at rest, paced faster | more block | conduction ratio ≤ 0.6 at 500 | epsim |
 | Mobitz II / 2:1 below the His | the ratio is the ladder's, not the rate's (Abedin 4.2) | reproduced as a pattern; pacing does not change it | epsim static replay |
 | adenosine | transient AV block; the sinus node slows | no V for the 6 s, sinus slower by 15 % | maneuvers |
@@ -60,8 +60,8 @@ V-A-A-V: two atrial activations before the next V, an atrial tachycardia).
 
 | maneuver | textbook | model | test |
 |---|---|---|---|
-| atrial S2 | the AH jumps ≥ 50 ms when S2 reaches the fast pathway's ERP (≈ 340–350 after a 600 drive) and the tachycardia is induced from there (Kusumoto 10.6–10.7; Abedin 5.5) | AH 207 → 276 between S2 350 and 340; induced at 340, 300, 280; not at 350 | epsim: AVNRT |
-| atrial overdrive | entrains; on cessation the first VA equals the following ones (Abedin Table 5.2) | entrained at TCL − 30; resumes at its CL; first VA 37 vs 35 | maneuvers |
+| atrial S2 | the AH jumps ≥ 50 ms when S2 reaches the fast pathway's ERP (≈ 340–350 after a 600 drive) and the tachycardia is induced from there (Kusumoto 10.6–10.7; Abedin 5.5) | AH 207 → 276 between S2 350 and 340; induced at 340, 320, 300, 280; not at 350 | epsim: AVNRT |
+| atrial overdrive | entrains; on cessation the first VA equals the following ones (Abedin Table 5.2) | entrained at TCL − 30; resumes at its CL; first VA 36 vs 35 | maneuvers |
 | PAC in tachycardia | resets when it reaches the circuit | *not modelled at the ostium*: one atrium, so a PAC delivered when the atrium has fired cannot enter the slow pathway alone | — |
 | ventricular entrainment | entrains, V-A-V; PPI − TCL > 115; SA − VA > 85; ΔHA > 0 (≈ +31 ± 24); VA(pacing) > VA(SVT) (Abedin 5.5; Michaud 2001; Ho 2008) | V-A-V; PPI − TCL 148; SA − VA 136; ΔHA +51; resumes | maneuvers |
 | PVC when the His is refractory | does not reset the atrium (Kusumoto 5.15; Abedin 5.16) | next A on time (Δ 0) at every coupling around the His | maneuvers |
@@ -77,19 +77,19 @@ V-A-A-V: two atrial activations before the next V, an atrial tachycardia).
 | ventricular entrainment | V-A-V; PPI − TCL > 115 (Abedin Fig. 5.15: 130) | V-A-V; PPI − TCL 153; resumes | maneuvers |
 | atrial overdrive | entrains, resumes | resumes at its CL | maneuvers |
 | PVC when the His is refractory | no reset | Δ 0 | maneuvers |
-| very premature PVC | termination without reset: the A comes on time over the slow pathway, then the node is refractory (Kusumoto 5.17, Fig. 5.19) | terminated without reset at couplings 180–120 ms before the His | maneuvers |
+| very premature PVC | termination without reset: the A comes on time over the slow pathway, then the node is refractory (Kusumoto 5.17, Fig. 5.19) | terminated without reset at a coupling 160 ms before the His; at 140–100 ms the atrium is reset instead | maneuvers |
 | adenosine, shock | terminate; sinus rhythm does not echo afterwards (every sinus wave enters the slow pathway from above and meets the wave coming back) | terminate; sinus | maneuvers |
 
 ### Orthodromic AVRT (`avrt`)
 
 | maneuver | textbook | model | test |
 |---|---|---|---|
-| atrial S2 | induced when the AH lengthens enough for the pathway to recover (Kusumoto 9.20; Abedin 5.6) | induced at 300, 280, 260, 240; not at ≥ 320 | epsim |
+| atrial S2 | induced when the AH lengthens enough for the pathway to recover (Kusumoto 9.20; Abedin 5.6) | induced from S2 360 down to at least 280 (the S2 scan 400 → 220 first induces at 360); not at 400 | epsim |
 | sinus rhythm | no echo: the concealed pathway is refractory when the ventricle reaches it | no retrograde A after a shock | epsim |
-| ventricular entrainment | V-A-V; PPI − TCL < 115 (≈ 0 ± 12 for the apex); ΔHA < 0 (Abedin 5.5) | V-A-V; PPI − TCL 9; resumes | maneuvers |
+| ventricular entrainment | V-A-V; PPI − TCL < 115 (≈ 0 ± 12 for the apex); ΔHA < 0 (Abedin 5.5) | V-A-V; PPI − TCL 55 (left lateral pathway, timed to the next ventricular activation); SA − VA 40; resumes | maneuvers |
 | atrial overdrive | entrains; first VA equals the following (Abedin Table 5.2) | resumes; first VA 140 | maneuvers |
-| PVC when the His is refractory | advances the next A with the same sequence, or terminates without an A — proof of the pathway (Kusumoto 5.16; Abedin 5.6) | A advanced 25–90 ms at couplings from 40 ms before to 20 ms after the His | maneuvers |
-| earlier PVC | blocked in the pathway: terminates without an A (Kusumoto 5.18; Abedin 5.6) | terminated without an A at couplings 50–80 ms before the His | maneuvers |
+| PVC when the His is refractory | advances the next A with the same sequence, or terminates without an A — proof of the pathway (Kusumoto 5.16; Abedin 5.6) | septal pathway: A advanced 10–40 ms at couplings from 20 ms before to 10 ms after the His; left lateral pathway (from the apex): advanced 25 ms only 20 ms ahead of the His, ≤ 5 ms on or after it | maneuvers |
+| earlier PVC | blocked in the pathway: terminates without an A (Kusumoto 5.18; Abedin 5.6) | terminated without an A at couplings 50–70 ms before the His | maneuvers |
 | ventricular pacing, retrograde sequence | eccentric, the same as in tachycardia (Kusumoto 9.16; Abedin 5.22) | left lateral / posteroseptal / right free-wall by the setting | epsim |
 | ipsilateral bundle branch block | VA and TCL lengthen ≥ 30 ms — Coumel's sign (Kusumoto 9.21) | left lateral pathway with LBBB: VA 140 → 190, TCL 340 → 390; RBBB or a septal pathway: unchanged | epmaneuvers |
 | parahisian pacing | S–A unchanged on losing His capture with a septal pathway; lengthens with S–H over the node (Kusumoto 9.18) | septal pathway ΔS–A 0 / ΔS–H +60; no pathway +60 / +60; a left lateral pathway also reads as a pathway pattern (a limit of the model: no left ventricle) | epmaneuvers |
@@ -101,10 +101,10 @@ V-A-A-V: two atrial activations before the next V, an atrial tachycardia).
 
 | maneuver | textbook | model | test |
 |---|---|---|---|
-| ventricular entrainment | V-A-V; the decremental pathway lengthens the VA under pacing; PPI − TCL short (Abedin 5.6) | V-A-V; PPI − TCL 51; resumes | maneuvers |
-| PVC when the His is refractory | advances the A (or delays it — post-excitation — through the decremental pathway) | advanced 8–66 ms | maneuvers |
+| ventricular entrainment | V-A-V; the decremental pathway lengthens the VA under pacing; PPI − TCL short (Abedin 5.6) | V-A-V; PPI − TCL 54; resumes | maneuvers |
+| PVC when the His is refractory | advances the A (or delays it — post-excitation — through the decremental pathway) | advanced 23, 9 and 1 ms at couplings 20 ms before, on and 10 ms after the His; delayed 6 ms 20 ms after it (post-excitation) | maneuvers |
 | earlier PVC | blocked in the decremental pathway: termination without reset (Kusumoto 5.17) | terminated without reset, couplings 80–140 ms before the His | maneuvers |
-| atrial overdrive | resumes; the first VA a little longer over the decremental pathway | resumes; first VA 279 vs 270 | maneuvers |
+| atrial overdrive | resumes; the first VA a little longer over the decremental pathway | resumes; first VA 280 vs 270 | maneuvers |
 | adenosine | terminates (the node; the pathway itself is adenosine-sensitive too) | terminates | maneuvers |
 
 ### Antidromic AVRT (`avrtAnti`)
