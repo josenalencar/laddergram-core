@@ -58,6 +58,10 @@ export const COLORS = Object.freeze({
     HOLLOW: '#fff',            // the inside of a measured dot
     EGM_TIMELINE: '#e8ecf2',   // intracardiac channels: a time line every 100 ms
     EGM_TIMELINE_BOLD: '#cbd5e1',  // … and every second
+    PERIOD_ERP: 'rgba(217, 119, 6, 0.20)',       // refractory periods (periods.js): certainly refractory
+    PERIOD_ERP_EDGE: 'rgba(180, 83, 9, 0.55)',   // … their edge and the hatching of the span in which they recover
+    PERIOD_CONCEAL: 'rgba(109, 40, 217, 0.16)',  // left refractory by concealed conduction
+    PERIOD_CONCEAL_EDGE: 'rgba(91, 33, 182, 0.50)',
 });
 const INK = COLORS.INK, MUTED = COLORS.MUTED, COL_P = COLORS.P, COL_Q = COLORS.Q, COL_SEL = COLORS.SEL, BRACKET_COL = COLORS.BRACKET;
 const GRID_FINE = COLORS.GRID_FINE, GRID_BOLD = COLORS.GRID_BOLD;
@@ -653,6 +657,60 @@ export function resolveBrackets(brackets, view, layout, g) {
 }
 
 /**
+ * Refractory periods (periods.js) in pixels: one box per period inside its tier's band — in the 'lines' style
+ * the band is the strip between the tier's line and the next one, where the ladder draws that level's
+ * conduction. { x0, x1, x1Hi, y0, y1, kind }. A period whose tier the group does not have is left out.
+ */
+export function resolvePeriods(periods, view, layout, g) {
+    const G = layout.groups[g];
+    const out = [];
+    if (!G || !periods?.length) return out;
+    for (const p of periods) {
+        const b = G.bands[p.tier];
+        if (!b || !(b.bottom > b.top)) continue;
+        const x0 = view.xOf(p.t0Ms), x1 = view.xOf(p.t1Ms), x1Hi = view.xOf(p.t1HiMs ?? p.t1Ms);
+        if (![x0, x1, x1Hi].every(Number.isFinite)) continue;
+        out.push({ x0, x1, x1Hi: Math.max(x1, x1Hi), y0: b.top + 2, y1: b.bottom - 2, kind: p.kind });
+    }
+    return out;
+}
+
+/**
+ * Periods behind the ladder: a tinted box while the structure is certainly refractory, hatching over the span
+ * in which it recovers. Painted before the paths, so a line through a period is never covered; no text of its
+ * own (the legend and the notes say what the shading means), so nothing is written over anything else.
+ */
+export function drawPeriodsPx(ctx, list) {
+    if (!list?.length) return;
+    ctx.save();
+    for (const r of list) {
+        const conceal = r.kind === 'conceal';
+        const fill = conceal ? COLORS.PERIOD_CONCEAL : COLORS.PERIOD_ERP;
+        const edge = conceal ? COLORS.PERIOD_CONCEAL_EDGE : COLORS.PERIOD_ERP_EDGE;
+        const h = r.y1 - r.y0;
+        ctx.fillStyle = fill;
+        ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, h);
+        ctx.strokeStyle = edge;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(r.x0 + 0.5, r.y0); ctx.lineTo(r.x0 + 0.5, r.y1); ctx.stroke();
+        if (r.x1Hi > r.x1 + 1) {
+            // the span in which it recovers: hatched, clipped to its box
+            ctx.save();
+            ctx.beginPath(); ctx.rect(r.x1, r.y0, r.x1Hi - r.x1, h); ctx.clip();
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            for (let x = r.x1 - h; x < r.x1Hi; x += 6) { ctx.moveTo(x, r.y1); ctx.lineTo(x + h, r.y0); }
+            ctx.stroke();
+            ctx.restore();
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath(); ctx.moveTo(r.x1Hi - 0.5, r.y0); ctx.lineTo(r.x1Hi - 0.5, r.y1); ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+    ctx.restore();
+}
+
+/**
  * The brackets of one ladder, in pixels: guides, the dimension line with inward arrowheads, the label.
  * Returns the box each label was drawn in, so an editor can let the reader take hold of it.
  */
@@ -970,6 +1028,8 @@ export function drawFrame(ctx, o) {
         // Frames for every ladder first, then the ladders themselves: a caption or a label that hangs below
         // its own group used to be painted over by the next group's band fill.
         groupsPx.forEach((G, g) => drawTierGroup(ctx, layout, g, { x0, x1, letter: G.letter, title: G.title, caption: G.caption }));
+        // periods behind every ladder, over its frame
+        groupsPx.forEach((G) => { if (G.periodsPx?.length) drawPeriodsPx(ctx, G.periodsPx); });
         groupsPx.forEach((G, g) => {
             placed.push(drawResolvedGroup(ctx, G.resolved ?? { paths: [], events: [] }, { x0, rules: tierRules(layout, g) }));
             if (G.bracketsPx?.length) for (const r of drawBracketsPx(ctx, G.bracketsPx)) bracketBoxes.push({ g, i: r.i, box: r.box });
@@ -979,6 +1039,8 @@ export function drawFrame(ctx, o) {
         // Same order as the groupsPx branch above: every frame, then every ladder.
         drawTierGroup(ctx, layout, 0, { x0, x1, letter: current.letter ?? null, title: current.title ?? null, caption: current.caption ?? null });
         layers.forEach((l, i) => drawTierGroup(ctx, layout, i + 1, { x0, x1, letter: l.letter ?? null, title: l.title ?? l.label ?? null, caption: l.caption ?? null }));
+        if (current.periods?.length) drawPeriodsPx(ctx, resolvePeriods(current.periods, view, layout, 0));
+        layers.forEach((l, i) => { if (l.periods?.length) drawPeriodsPx(ctx, resolvePeriods(l.periods, view, layout, i + 1)); });
         drawLadderGroup(ctx, view, layout, 0, ladder, { ...common, selected, showIntervals, title: current.title, letter: current.letter, caption: current.caption, brackets: current.brackets });
         layers.forEach((l, i) => drawLadderGroup(ctx, view, layout, i + 1, l.ladder, { ...common, title: l.title ?? l.label, letter: l.letter, caption: l.caption, brackets: l.brackets }));
     }

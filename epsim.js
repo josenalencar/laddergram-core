@@ -388,12 +388,14 @@ export function fromReading(input, ep = DEFAULT_EP) {
                 for (let k = 1; k <= bits.length; k++) if (bits.every((b, i) => i < k || b === bits[i - k])) return bits.slice(0, k);
                 return bits;
             };
-            if (mech === 'avnodal' && !ectopy && P.blockBelowHis < 0.5 && blocks.length && samples.length >= 2) {
+            if (mech === 'avnodal' && !ectopy && P.blockBelowHis < 0.5 && blocks.length && samples.length >= 1) {
                 const ds = samples.map(x => x.d);
                 const minC = Math.min(...samples.map(x => x.DI)), maxB = Math.max(...blocks.map(x => x.DI));
                 if (maxB < minC) {
                     const erp = (maxB + minC) / 2;
-                    if (Math.max(...ds) - Math.min(...ds) >= 30) {
+                    // one conducted recovery is enough for a fixed ratio (a short 2:1 strip has only one); the curve
+                    // of a Wenckebach needs the spread of several
+                    if (ds.length >= 2 && Math.max(...ds) - Math.min(...ds) >= 30) {
                         // Wenckebach: the delay grows as the recovery shortens, until a P meets a refractory node
                         fast.ante = fitRecovery(samples, erp);
                     } else {

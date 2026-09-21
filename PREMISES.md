@@ -302,3 +302,23 @@ submission): every one of them was an error the previous rule produced.
   100 ms and a taller one every second. Every deflection comes from `activationDeflections`, the static figure's
   own mapping.
 
+
+## 8. Refractory periods (`periods.js`) — 2026-09-21, 1.24.0
+
+- **A period says why an impulse stopped, never more than the strip shows.** A bar is drawn only when it
+  explains a block the ladder draws: a P blocked in the AV node, a wave blocked below the His, or a P that met a
+  node left refractory by concealed conduction. Nothing else gets a bar.
+- **Recovery is counted from the end of conduction**, as the live heart counts it (`epsim.js`): the bar starts
+  when the wave that makes the structure refractory enters it and runs until at least the longest recovery after
+  which a wave was still blocked (solid), then hatched up to the shortest recovery after which one conducted. The
+  strip gives a span, and the figure shows a span: never a single "refractory period of N ms".
+- **What recovery does not explain gets a sentence, not a bar**: a fixed ratio at recoveries no shorter than
+  conducted ones (Mobitz II), complete block, a block below the His on a ladder without a His tier.
+- **A concealment bar runs to the P it blocked**, never further (how long the node stayed refractory beyond it
+  is not known), and only when that P comes within 450 ms of the concealed wave.
+- Bars sit inside the tier's band — in the dots-on-lines style, the strip between that tier's line and the next —
+  painted after the frames and before any ladder, with no text of their own: the notes and the figure legend say
+  what the shading means. Off unless a ladder asks for them (`periods: { show: true }`), so every existing figure
+  is unchanged.
+- The live heart and the bars agree by test (`test/periods.test.mjs`): every block the live model produces between
+  the first conducted wave and the last QRS falls inside a bar.

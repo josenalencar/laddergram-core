@@ -9,6 +9,7 @@
 import { buildLadder } from './engine.js';
 import { toLineStyle } from './export.js';
 import { intervalBrackets } from './figures.js';
+import { ladderPeriods } from './periods.js';
 
 export const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -25,11 +26,12 @@ import { capLines } from './render.js';
 
 /**
  * Every ladder drawn, top to bottom.
- * @param items  [{ mechanism, params, tiers, beats, atrial, style?, title?, caption?, brackets?, ladder? }]
+ * @param items  [{ mechanism, params, tiers, beats, atrial, style?, title?, caption?, brackets?, periods?, ladder? }]
+ *               — `periods: { show: true }` adds the refractory periods that explain its blocks (periods.js)
  *               — `ladder` is built when absent (a layer keeps the one it was built with).
  * @param o.style        the default tier style ('bands' | 'lines')
  * @param o.durationMs   the strip length, for ladders built here
- * @returns [{ ...item, style, ladder, drawn, bracketList, letter, shownTitle }]
+ * @returns [{ ...item, style, ladder, drawn, bracketList, periodList, letter, shownTitle }]
  */
 export function composeStack(items, { style = 'bands', durationMs } = {}) {
     const many = items.length > 1;
@@ -40,6 +42,9 @@ export function composeStack(items, { style = 'bands', durationMs } = {}) {
         return {
             ...l, style: st, ladder, drawn,
             bracketList: l.brackets ? intervalBrackets(l, drawn, l.brackets) : null,
+            periodList: l.periods?.show && ladder
+                ? ladderPeriods({ beats: l.beats, atrial: l.atrial, mechanism: l.mechanism, params: l.params, tiers: l.tiers, durationMs }, { ladder })
+                : null,
             letter: many ? LETTERS[i] || String(i + 1) : null,
             shownTitle: l.title || (many ? (SHORT[l.mechanism] || l.mechanism) : ''),
         };
@@ -70,7 +75,7 @@ export function frameGroups(stack) {
     const [cur, ...rest] = stack;
     return {
         ladder: cur?.drawn ?? null,
-        current: cur ? { letter: cur.letter, title: cur.shownTitle, caption: cur.caption, brackets: cur.bracketList } : {},
-        layers: rest.map(l => ({ letter: l.letter, title: l.shownTitle, caption: l.caption, ladder: l.drawn, brackets: l.bracketList })),
+        current: cur ? { letter: cur.letter, title: cur.shownTitle, caption: cur.caption, brackets: cur.bracketList, periods: cur.periodList?.periods ?? null } : {},
+        layers: rest.map(l => ({ letter: l.letter, title: l.shownTitle, caption: l.caption, ladder: l.drawn, brackets: l.bracketList, periods: l.periodList?.periods ?? null })),
     };
 }

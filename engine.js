@@ -101,7 +101,7 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.23.2';
+export const ENGINE_VERSION = '1.24.0';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -1272,6 +1272,12 @@ export function buildLadder(input) {
     const B = makeBuilder(mechanism, P, T);
     const beats = input.beats || [];
     RULES[mechanism](B, { beats, atrial: input.atrial || [], durationMs: input.durationMs });
+    if (input.mechanism && !RULES[input.mechanism]) {
+        // a reading from a newer engine: say so, rather than pass sinus rhythm off as that reading
+        B.L.unknownMechanism = String(input.mechanism);
+        B.note(`This engine (${ENGINE_VERSION}) does not know the reading "${input.mechanism}": it is drawn as sinus / AV conduction. `
+            + 'Open it in an up-to-date version.', 'caution', 'unknown-mechanism');
+    }
     conductionNotes(B, beats);
     assignKeys(B.L);
     B.L.engine = { name: ENGINE_NAME, version: ENGINE_VERSION };

@@ -21,6 +21,7 @@
 import { TIER_CATALOG, CONDUCTIONS, normalizeTiers, ENGINE_NAME, ENGINE_VERSION } from './engine.js';
 import { makeLayout, capLines } from './render.js';
 import { cleanEp } from './egm.js';
+import { cleanPeriods } from './periods.js';
 
 // GROUP_GAP: lewis-ladder adds this much room before every ladder after the first
 // (src/lib/ladders.ts lineOffsets) — the two must match or points miss their lines.
@@ -45,13 +46,14 @@ const atrialOut = (a) => ({ id: a.id, tMs: a.tMs, source: a.source || 'auto',
 
 export function toLaddergramJson({ filename = null, lead = null, fs = null, durationMs = null, speed = null,
                                    beats, atrial, mechanism, params, tiers = null, ladder, layers = [], title = '', caption = '', style = 'bands', brackets = null,
-                                   styleOverrides = null, hiddenKeys = null, ep = null }) {
+                                   periods = null, styleOverrides = null, hiddenKeys = null, ep = null }) {
     return {
         format: FORMAT, version: FORMAT_VERSION, createdAt: new Date().toISOString(),
         source: { filename, lead, fs, durationMs },
         display: { speedMmS: speed },
         mechanism, params, tiers: normalizeTiers(tiers || ladder?.tiers), title: title || '', caption: caption || '', style: cleanStyle(style) || 'bands',
         ...(cleanBrackets(brackets) ? { brackets: cleanBrackets(brackets) } : {}),
+        ...(cleanPeriods(periods) ? { periods: cleanPeriods(periods) } : {}),
         ...(cleanRestyle(styleOverrides) ? { styleOverrides: cleanRestyle(styleOverrides) } : {}),
         ...(cleanHidden(hiddenKeys) ? { hiddenKeys: cleanHidden(hiddenKeys) } : {}),
         // the EP view the reading was shown in (catheters, block order, sweep speed): it travels with the file
@@ -64,6 +66,7 @@ export function toLaddergramJson({ filename = null, lead = null, fs = null, dura
                                    tiers: normalizeTiers(l.tiers), beats: l.beats.map(beatOut), atrial: l.atrial.map(atrialOut),
                                    ...(cleanStyle(l.style) ? { style: l.style } : {}),
                                    ...(cleanBrackets(l.brackets) ? { brackets: cleanBrackets(l.brackets) } : {}),
+                                   ...(cleanPeriods(l.periods) ? { periods: cleanPeriods(l.periods) } : {}),
                                    ...(cleanRestyle(l.styleOverrides) ? { styleOverrides: cleanRestyle(l.styleOverrides) } : {}),
                                    ...(cleanHidden(l.hiddenKeys) ? { hiddenKeys: cleanHidden(l.hiddenKeys) } : {}) })),
     };
@@ -108,12 +111,12 @@ export function fromLaddergramJson(obj) {
         .filter(l => l && Array.isArray(l.beats))
         .map((l, i) => ({ id: String(l.id || `L${i}`), title: String(l.title ?? l.label ?? ''), caption: String(l.caption || ''), mechanism: l.mechanism || 'avnodal',
                           params: l.params || {}, tiers: normalizeTiers(l.tiers), beats: cleanBeats(l.beats), atrial: cleanAtrial(l.atrial),
-                          ...(cleanStyle(l.style) ? { style: l.style } : {}), brackets: cleanBrackets(l.brackets),
+                          ...(cleanStyle(l.style) ? { style: l.style } : {}), brackets: cleanBrackets(l.brackets), periods: cleanPeriods(l.periods),
                           styleOverrides: cleanRestyle(l.styleOverrides) || {}, hiddenKeys: cleanHidden(l.hiddenKeys) || [] }));
     return { beats: cleanBeats(obj.beats), atrial: cleanAtrial(obj.atrial), mechanism: obj.mechanism || 'avnodal',
              params: obj.params || {}, tiers: normalizeTiers(obj.tiers), layers, source: obj.source || {},
              title: String(obj.title || ''), caption: String(obj.caption || ''), style: cleanStyle(obj.style) || 'bands',
-             brackets: cleanBrackets(obj.brackets),
+             brackets: cleanBrackets(obj.brackets), periods: cleanPeriods(obj.periods),
              styleOverrides: cleanRestyle(obj.styleOverrides) || {}, hiddenKeys: cleanHidden(obj.hiddenKeys) || [],
              ep: cleanEp(obj.ep) };
 }
@@ -440,6 +443,7 @@ export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands',
             return { group: g, mechanism: r.mechanism || src.mechanism || 'avnodal', params: r.params || {}, tiers: r.tiers || src.tiers || [],
                      ...(r.beatOverrides && Object.keys(r.beatOverrides).length ? { beatOverrides: r.beatOverrides } : {}),
                      ...(r.brackets ? { brackets: r.brackets } : {}),
+                     ...(cleanPeriods(r.periods) ? { periods: cleanPeriods(r.periods) } : {}),
                      engineVersion: ENGINE_VERSION, status: r.linked === false ? 'detached' : 'linked' };
         });
     }

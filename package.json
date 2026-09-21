@@ -1,6 +1,6 @@
 {
   "name": "laddergram-core",
-  "version": "1.23.2",
+  "version": "1.24.0",
   "description": "Plausibility engine and renderer for Lewis ladder diagrams (laddergrams): marks in, ladder out, one drawing. Shared by the ECG viewer's generator and the Lewis Ladder editor.",
   "type": "module",
   "private": true,
@@ -17,7 +17,8 @@
     "./egm": "./egm.js",
     "./epsim": "./epsim.js",
     "./eplive": "./eplive.js",
-    "./epmaneuvers": "./epmaneuvers.js"
+    "./epmaneuvers": "./epmaneuvers.js",
+    "./periods": "./periods.js"
   },
   "files": [
     "engine.js",
@@ -32,11 +33,12 @@
     "epsim.js",
     "eplive.js",
     "epmaneuvers.js",
+    "periods.js",
     "README.md",
     "MANEUVERS.md",
     "PREMISES.md"
   ],
   "scripts": {
-    "test": "node test/golden.test.mjs && node test/detect.test.mjs && node test/rhythm.test.mjs && node test/perbeat.test.mjs && node test/handles.test.mjs && node test/render-golden.test.mjs && node test/layout.test.mjs && node test/egm.test.mjs && node test/epsim.test.mjs && node test/maneuvers.test.mjs && node test/epmaneuvers.test.mjs"
+    "test": "node test/golden.test.mjs && node test/detect.test.mjs && node test/rhythm.test.mjs && node test/perbeat.test.mjs && node test/handles.test.mjs && node test/render-golden.test.mjs && node test/layout.test.mjs && node test/egm.test.mjs && node test/epsim.test.mjs && node test/maneuvers.test.mjs && node test/epmaneuvers.test.mjs && node test/periods.test.mjs"
   }
 }
