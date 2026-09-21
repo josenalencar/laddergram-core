@@ -323,5 +323,15 @@ section('the live recorder');
     ok('a hidden page does not replay minutes', Math.abs(sweep.penT - (before + 60000)) < 1);
 }
 
+
+section('surface lead II of paced and ectopic beats');
+{
+    const at = (origin, lo, hi) => { let mn = 0, mx = 0; for (let t = lo; t <= hi; t++) { const v = surfaceAt([{ kind: 'V', tMs: 0, origin }], 'II', t); mn = Math.min(mn, v); mx = Math.max(mx, v); } return { mn, mx }; };
+    const rv = at('RV', 0, 160), rvT = at('RV', 220, 420), base = at('RVb', 0, 160);
+    ok('RV apex: QRS negative in II (superior axis)', rv.mn < -0.5 && rv.mx < 0.1, `min ${rv.mn.toFixed(2)} max ${rv.mx.toFixed(2)}`);
+    ok('RV apex: T discordant, upright in II', rvT.mx > 0.15, `T max ${rvT.mx.toFixed(2)}`);
+    ok('RV base: QRS upright in II (inferior axis)', base.mx > 0.5, `max ${base.mx.toFixed(2)}`);
+}
+
 console.log(`\n${pass} ok, ${fail} fail`);
 if (fail) process.exit(1);

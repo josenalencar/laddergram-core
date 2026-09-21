@@ -26,13 +26,20 @@ const AXIS = {
 };
 
 // Wave templates: [dt from onset (ms), sigma (ms), amplitude (mV), vector].
-const P_SINUS = [[35, 14, 0.14, unit([0.25, 0.85, 0.45])], [66, 16, 0.1, unit([0.75, 0.45, -0.5])]];
+// P and QRS templates start where their marks are: in lead II every wave leaves the baseline (> 0.04 mV) within
+// ~5 ms of its onset mark, so PR/RP measured on a printed lead II agree with the intervals the marks give.
+const P_SINUS = [[22, 12, 0.14, unit([0.25, 0.85, 0.45])], [53, 16, 0.1, unit([0.75, 0.45, -0.5])]];
 // Retrograde P: low-septal exit, inferior → superior: a clear negative P in II/III/aVF (≈ −0.2 mV), positive in
 // aVR and V1 (the pseudo-r′). Larger and broader than a sinus P, as retrograde P waves are on real tracings.
-const P_RETRO = [[36, 18, 0.2, unit([-0.1, -0.95, 0.3])], [70, 14, 0.05, unit([-0.1, -0.95, 0.3])]];
+const P_RETRO = [[30, 16, 0.2, unit([-0.1, -0.95, 0.3])], [64, 14, 0.05, unit([-0.1, -0.95, 0.3])]];
 const P_PAC = [[34, 15, 0.1, unit([0.35, 0.6, 0.7])], [62, 16, 0.07, unit([0.7, 0.3, -0.4])]];
 const QRS = {
     normal: { width: 95, parts: [[14, 6, 0.18, unit([-0.4, 0.1, 0.9])], [44, 11, 1.5, unit([0.55, 0.75, -0.35])], [72, 9, 0.35, unit([-0.2, -0.5, -0.45])]],
+              t: [[1, 55, 0.32, unit([0.45, 0.7, 0.35])], [1.12, 35, 0.08, unit([0.45, 0.7, 0.35])]] },
+    // The narrow QRS of the review's figures (timeline.visibleOnset): the same beat, but its septal vector has an
+    // inferior component, so lead II shows a small q AT the onset mark instead of staying flat for ~18 ms (the
+    // printed RP/PR then measure what the text quotes). Opt-in, because the detector's T search is tuned to `normal`.
+    normalVisible: { width: 95, parts: [[12, 5, 0.22, unit([-0.4, -0.45, 0.8])], [44, 11, 1.5, unit([0.55, 0.75, -0.35])], [72, 9, 0.35, unit([-0.2, -0.5, -0.45])]],
               t: [[1, 55, 0.32, unit([0.45, 0.7, 0.35])], [1.12, 35, 0.08, unit([0.45, 0.7, 0.35])]] },
     // Nonspecific intraventricular conduction delay, 110 ms: wider than normal but below the 120-ms threshold of
     // bundle branch block (Figure 6 of the review). Fragmented on purpose — q, R, a notch (RsR′, 0.2 mV deep) and
@@ -46,12 +53,12 @@ const QRS = {
             t: [[1, 55, 0.28, unit([0.55, 0.6, -0.25])], [1.12, 35, 0.07, unit([0.55, 0.6, -0.25])]] },
     // Wide complexes are wide, not slow: real LBBB / PVC upstrokes are steep, the
     // width comes from a second, delayed component (and PVCs are bigger).
-    lbbb: { width: 160, parts: [[18, 8, 0.3, unit([0.6, 0, -0.8])], [52, 15, 1.25, unit([0.8, 0.2, -0.55])], [112, 19, 1.1, unit([0.75, 0.3, -0.6])]],
+    lbbb: { width: 160, parts: [[14, 8, 0.3, unit([0.6, 0, -0.8])], [52, 15, 1.25, unit([0.8, 0.2, -0.55])], [112, 19, 1.1, unit([0.75, 0.3, -0.6])]],
             t: [[1, 60, 0.36, unit([-0.6, -0.2, 0.7])]] },
     pvc: { width: 170, parts: [[30, 11, 1.1, unit([0.2, 0.9, -0.4])], [78, 18, 1.5, unit([0.3, 0.85, -0.45])], [132, 18, 0.5, unit([-0.2, -0.3, 0.6])]],
            t: [[1, 60, 0.5, unit([-0.3, -0.8, 0.4])]] },
     // Fusion: a conducted and a ventricular wavefront share the ventricles — intermediate width and form
-    fusion: { width: 125, parts: [[14, 6, 0.1, unit([-0.4, 0.1, 0.9])], [42, 11, 0.8, unit([0.55, 0.75, -0.35])],
+    fusion: { width: 125, parts: [[12, 5, 0.22, unit([-0.4, -0.45, 0.8])], [42, 11, 0.8, unit([0.55, 0.75, -0.35])],
                                   [70, 16, 0.8, unit([-0.45, -0.72, 0.52])], [110, 16, 0.25, unit([0.35, 0.3, -0.55])]],
               t: [[1, 60, 0.3, unit([0.4, 0.7, -0.1])]] },
     // LV-origin VT: RBBB-like, left superior axis (dominant R in V1, negative II/III/aVF)
@@ -91,7 +98,7 @@ export function synthesizeEcg(timeline, { fs = SYNTH_FS, seed = 7, name = 'synth
     for (const p of timeline.P || []) addBumps(acc, fs, p.t, p.kind === 'retro' ? P_RETRO : p.kind === 'pac' ? P_PAC : P_SINUS);
     const Q = (timeline.QRS || []).slice().sort((a, b) => a.t - b.t);
     Q.forEach((q, i) => {
-        const tpl = QRS[q.morph] || QRS.normal;
+        const tpl = (q.morph === 'normal' && timeline.visibleOnset ? QRS.normalVisible : QRS[q.morph]) || QRS.normal;
         addBumps(acc, fs, q.t, tpl.parts);
         const rr = i > 0 ? q.t - Q[i - 1].t : (Q[1] ? Q[1].t - q.t : 800);
         if (timeline.fastT && rr < 700) {
@@ -268,10 +275,10 @@ export const SYNTH_SCENARIOS = [
       timeline: () => tachyTrain({ cl: 360, rp: 0, dur: 4200 }) },
     { id: 'svtShortRP', label: 'Short-RP narrow-QRS tachycardia (RP 80 ms)', expect: 'avnrt',
       hint: 'CL 360 ms, RP 80, PR 280: the retrograde P is the notch just after the QRS (pseudo-S in II, pseudo-r′ in V1). Compatible with AVNRT, orthodromic AVRT, atrial tachycardia with 1st-degree block and junctional tachycardia.',
-      timeline: () => tachyTrain({ cl: 360, rp: 80, dur: 4200 }) },
+      timeline: () => ({ ...tachyTrain({ cl: 360, rp: 80, dur: 4200 }), visibleOnset: true }) },
     { id: 'svtLongRP', label: 'Long-RP narrow-QRS tachycardia (RP 270 ms)', expect: 'pjrt',
       hint: 'CL 460 ms (130 /min), RP 270, PR 190: a deep negative P in II/III/aVF in diastole, right after a small T. Compatible with PJRT, fast–slow AVNRT and atrial tachycardia.',
-      timeline: () => tachyTrain({ cl: 460, rp: 270, dur: 5000 }) },
+      timeline: () => ({ ...tachyTrain({ cl: 460, rp: 270, dur: 5000 }), visibleOnset: true }) },
     { id: 'wideTachy1to1', label: 'Wide-QRS tachycardia with 1:1 VA (RP 210 ms)', expect: 'vt',
       hint: 'CL 340 ms, QRS ~150 ms with LBBB form, retrograde P 210 ms after QRS onset (P-to-QRS 130 ms) — VT with 1:1 VA, fast–slow AVNRT with LBBB, or antidromic AVRT over a fast pathway.',
       timeline: () => tachyTrain({ cl: 340, rp: 210, dur: 4000, morph: 'lbbb' }) },
@@ -293,7 +300,7 @@ export const SYNTH_SCENARIOS = [
           for (const t of [2360, 2940, 3520, 4100]) QRS.push({ t, morph: 'vt' });
           QRS.push({ t: 4640, morph: 'fusion', fusion: true, focusAt: 4680 });      // P 4460, PR 180; focus 40 ms later
           for (const t of [5260, 5840]) QRS.push({ t, morph: 'vt' });
-          return { durationMs: 6000, P, QRS, flutter: null, af: false };
+          return { durationMs: 6000, P, QRS, flutter: null, af: false, visibleOnset: true };
       } },
     { id: 'twoToOneNarrow', label: '2:1 AV block, narrow QRS (sinus 75 /min, PR 220)', expect: 'avnodal',
       hint: 'Sinus 75 /min; every other P conducts, both with PR 220 and a narrow QRS — 2:1 block in the AV node or below the His, or concealed His extrasystoles (pseudo-block).',

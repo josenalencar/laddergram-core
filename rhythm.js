@@ -157,7 +157,7 @@ export function plausibility(beats = [], atrial = [], params = null) {
     // QRS width
     if (!m.wide) {
         exclude(['avrtAnti'], `narrow QRS (${m.qrsMs} ms): antidromic AVRT is maximally pre-excited, so its QRS is wide`);
-        caution(['vt'], `narrow QRS (${m.qrsMs} ms): VT is wide, except fascicular VT (QRS 100–140 ms)`);
+        caution(['vt'], `narrow QRS (${m.qrsMs} ms): VT is wide; even fascicular VT, the narrowest, is usually 100–140 ms`);
     }
     if (!m.anyEctopic && !m.wide) caution(['pvc'], 'no beat is marked ectopic (select a QRS and tick "Ectopic")');
 
@@ -185,6 +185,10 @@ export function plausibility(beats = [], atrial = [], params = null) {
         }
         if (m.prFixed) exclude(['avb3'], 'every QRS follows its P at a fixed PR: conduction, not complete block');
         caution(['hisExtra'], 'no P fails to conduct');
+        // a P before every QRS is not fibrillation; a fast sinus rhythm conducts with a short PR (the AV node is
+        // under the same sympathetic drive), so a long PR at a tachycardia rate is a P that belongs to the previous QRS
+        exclude(['afib'], `a P before each QRS (1:1): atrial fibrillation has no discrete P waves`);
+        if (m.tachy && m.PR != null && m.PR >= 250) caution(['avnodal'], `${rp} at ${m.rate}/min: a sinus tachycardia this fast conducts with a short PR — a P this far from the next QRS is more likely a retrograde P or an ectopic atrial rhythm (P-wave axis is not evaluated)`);
     } else if (m.relation === 'A>V') {
         exclude(AVRT_FAMILY, `more P than QRS (${m.pPerCycle} per cycle): AVRT needs 1:1 — the atrium and the ventricle are both in the circuit`);
         caution(['avnrt'], `more P than QRS: AVNRT with block below the circuit is rare`);

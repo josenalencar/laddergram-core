@@ -35,7 +35,8 @@ const QRS_SHAPES = {
     normal: { II: [[12, 5, -0.1], [38, 9, 1.1], [62, 8, -0.25]], V1: [[18, 6, 0.25], [48, 12, -0.9]] },
     RBBB: { II: [[12, 5, -0.08], [36, 9, 0.9], [60, 9, -0.2], [100, 16, -0.35]], V1: [[16, 6, 0.3], [40, 9, -0.35], [92, 15, 0.8]] },
     LBBB: { II: [[30, 14, 0.7], [95, 20, 0.6]], V1: [[20, 8, 0.1], [70, 25, -1.1]] },
-    RV: { II: [[40, 16, 0.9], [110, 22, 0.5]], V1: [[70, 28, -1.2]] },
+    // from the RV apex: LBBB-like with a superior axis, so negative in II (paced at the apex, or an apical focus)
+    RV: { II: [[40, 16, -0.9], [110, 22, -0.5]], V1: [[70, 28, -1.2]] },
     LV: { II: [[40, 16, -0.8], [110, 22, -0.3]], V1: [[50, 20, 1.2], [120, 22, 0.4]] },
     // paced at the base of the right ventricle: LBBB-like, upright inferiorly (the wave leaves the basal septum downwards)
     RVb: { II: [[35, 15, 0.9], [100, 20, 0.4]], V1: [[60, 26, -1.1]] },
@@ -66,8 +67,10 @@ export function surfaceAt(acts, lead, tMs) {
             v += G(dt, 10, 12, lead === 'V1' ? 0.06 : 0.025);
         } else if (a.kind === 'V') {
             for (const [c, s, amp] of QRS_SHAPES[shapeOf(a.origin)][lead] || []) v += G(dt, c, s, amp);
-            const wide = shapeOf(a.origin) !== 'normal';
-            v += G(dt, wide ? 300 : 270, 45, lead === 'II' ? (wide ? -0.25 : 0.28) : (wide ? 0.2 : 0.12));
+            const sh = shapeOf(a.origin), wide = sh !== 'normal';
+            // a wide QRS carries a discordant T: opposite to its dominant deflection in the lead
+            const qrsSign = Math.sign((QRS_SHAPES[sh][lead] || []).reduce((acc, [, s2, amp]) => acc + s2 * amp, 0)) || 1;
+            v += G(dt, wide ? 300 : 270, 45, wide ? -qrsSign * (lead === 'II' ? 0.25 : 0.2) : (lead === 'II' ? 0.28 : 0.12));
         } else if (a.kind === 'S') {
             v += G(dt, 0.5, 0.6, 0.6) + G(dt, 3, 3, -0.08);
         }

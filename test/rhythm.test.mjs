@@ -223,5 +223,18 @@ console.log('\nthe pairing window the ladder is drawn with');
     ok(`avrtAnti: apAnteMs measured (${pp.params.apAnteMs} ms, cycle 400 − RP 150)`, pp.source.apAnteMs === 'measured' && Math.abs(pp.params.apAnteMs - 250) <= 10);
 }
 
+{
+    // 1:1 tachycardias of the review (figures.js marks): no fibrillation, and no sinus tachycardia with a long PR
+    const { figureMarkers } = await import('../figures.js');
+    for (const [id, pr] of [['svtShortRP', 280], ['avnrt', 325]]) {
+        const { beats, atrial } = figureMarkers(makeExample(id));
+        const v = plausibility(beats, atrial).verdicts;
+        ok(`${id}: atrial fibrillation excluded when a P precedes every QRS`, v.afib.status === 'excluded');
+        ok(`${id}: sinus / AV conduction flagged at a tachycardia rate with PR ${pr}`, v.avnodal.status === 'caution');
+    }
+    const { beats, atrial } = figureMarkers(makeExample('svtLongRP'));
+    ok('svtLongRP (PR 190): sinus / AV conduction not flagged for its PR', plausibility(beats, atrial).verdicts.avnodal.status === 'ok');
+}
+
 console.log(`\n${pass} ok, ${fail} fail`);
 process.exit(fail ? 1 : 0);
