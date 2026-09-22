@@ -12,6 +12,8 @@ intermediate points are inferred by interval arithmetic, conduction times the su
 editable textbook values, and the intracardiac display is schematic and has not been validated against
 recorded electrograms.
 
+**Authorship.** Developed by José Nunes de Alencar with the assistance of an AI coding tool (Claude, Anthropic); the author designed, tested and reviewed the code and is responsible for it.
+
 **Licence.** Source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): free for
 teaching, research, and any other noncommercial use by individuals and noncommercial organizations. Commercial
 use needs the author's permission — open an issue on this repository to ask. This is not an OSI open-source
