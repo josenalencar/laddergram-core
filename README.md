@@ -1,5 +1,7 @@
 # laddergram-core
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22884897.svg)](https://doi.org/10.5281/zenodo.22884897)
+
 The pure (no DOM, no dependencies) engine behind the [Lewis Ladder](https://lewisladder.netlify.app) web
 application, which draws Lewis ladder diagrams from P-wave and QRS onsets marked on an electrocardiographic
 strip, shows the intracardiac recordings each diagram implies, and runs a network model of conduction that can
@@ -15,7 +17,7 @@ teaching, research, and any other noncommercial use by individuals and noncommer
 use needs the author's permission — open an issue on this repository to ask. This is not an OSI open-source
 licence.
 
-**Citation.** See [`CITATION.cff`](CITATION.cff). Archived releases carry a DOI.
+**Citation.** See [`CITATION.cff`](CITATION.cff). Every release is archived on Zenodo: [10.5281/zenodo.22884897](https://doi.org/10.5281/zenodo.22884897) (all versions); version 1.26.0 is [10.5281/zenodo.22884898](https://doi.org/10.5281/zenodo.22884898).
 
 **Tests.** `npm test` runs every suite (Node 20 or later, no dependencies to install).
 
