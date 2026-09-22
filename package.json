@@ -1,7 +1,14 @@
 {
   "name": "laddergram-core",
   "version": "1.26.0",
-  "description": "Plausibility engine and renderer for Lewis ladder diagrams (laddergrams): marks in, ladder out, one drawing. Shared by the ECG viewer's generator and the Lewis Ladder editor.",
+  "description": "Engine and renderer for Lewis ladder diagrams (laddergrams): marks in, ladder out, one drawing. Behind the Lewis Ladder web application.",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "José Nunes de Alencar (https://orcid.org/0000-0002-3835-6067)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/josenalencar/laddergram-core.git"
+  },
+  "homepage": "https://lewisladder.netlify.app",
   "type": "module",
   "private": true,
   "exports": {
@@ -36,7 +43,9 @@
     "periods.js",
     "README.md",
     "MANEUVERS.md",
-    "PREMISES.md"
+    "PREMISES.md",
+    "LICENSE.md",
+    "CITATION.cff"
   ],
   "scripts": {
     "test": "node test/golden.test.mjs && node test/detect.test.mjs && node test/rhythm.test.mjs && node test/perbeat.test.mjs && node test/handles.test.mjs && node test/render-golden.test.mjs && node test/layout.test.mjs && node test/egm.test.mjs && node test/epsim.test.mjs && node test/maneuvers.test.mjs && node test/epmaneuvers.test.mjs && node test/periods.test.mjs && node test/paced.test.mjs && node test/styles.test.mjs"

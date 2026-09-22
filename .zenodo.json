@@ -1,0 +1,14 @@
+{
+  "title": "laddergram-core: an engine that draws Lewis ladder diagrams from marked P-wave and QRS onsets",
+  "upload_type": "software",
+  "description": "Pure JavaScript engine behind the Lewis Ladder web application (https://lewisladder.netlify.app). From P-wave and QRS onsets marked on an electrocardiographic strip it flags the arrhythmia mechanisms that the measured intervals exclude, draws the ladder diagram of each remaining mechanism, displays the intracardiac recordings each diagram implies, and runs a network model of conduction that can be paced. A teaching tool, not a medical device.",
+  "creators": [
+    { "name": "Nunes de Alencar, José", "orcid": "0000-0002-3835-6067", "affiliation": "Instituto Dante Pazzanese de Cardiologia" }
+  ],
+  "license": { "id": "other-nc" },
+  "notes": "Licensed under the PolyForm Noncommercial License 1.0.0 (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial use requires permission from the author.",
+  "keywords": ["ladder diagram", "laddergram", "electrocardiography", "arrhythmia", "electrophysiology", "medical education"],
+  "related_identifiers": [
+    { "identifier": "https://lewisladder.netlify.app", "relation": "isSupplementTo", "resource_type": "software" }
+  ]
+}

@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "laddergram-core: an engine that draws Lewis ladder diagrams from marked P-wave and QRS onsets"
+type: software
+authors:
+  - family-names: "Nunes de Alencar"
+    given-names: "José"
+    orcid: "https://orcid.org/0000-0002-3835-6067"
+    affiliation: "Instituto Dante Pazzanese de Cardiologia, São Paulo, Brazil"
+version: "1.26.0"
+date-released: "2026-09-22"
+license: PolyForm-Noncommercial-1.0.0
+repository-code: "https://github.com/josenalencar/laddergram-core"
+url: "https://lewisladder.netlify.app"
+keywords:
+  - ladder diagram
+  - laddergram
+  - electrocardiography
+  - arrhythmia
+  - electrophysiology
+  - medical education
