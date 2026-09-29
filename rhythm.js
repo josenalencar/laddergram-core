@@ -60,7 +60,7 @@ export function measureRhythm(beats = [], atrial = [], params = null) {
         rrPeriod, afVeto: false, pqSweep: null,
         tachy: RRg != null && RRg < TACHY_RR_MS,
         relation: A.length ? 'unknown' : 'none', RP: null, PR: null, rpClass: null, rpSD: null, pPerCycle: null,
-        PP: null, ppCV: null, prFixed: false, prSD: null, dissociated: false, coveredCycles: 0,
+        PP: null, ppCV: null, pCoverage: null, prFixed: false, prSD: null, dissociated: false, coveredCycles: 0,
     };
     if (A.length >= 2) {
         // the atrial cycle, tolerant of a missed P (an interval of 2 × PP) or an extra one: the base
@@ -76,6 +76,13 @@ export function measureRhythm(beats = [], atrial = [], params = null) {
         base = median(norm.length ? norm : pp);
         out.PP = round(base);
         out.ppCV = norm.length >= Math.max(2, 0.75 * pp.length) ? +cv(norm).toFixed(3) : +cv(pp).toFixed(3);
+        // How many of the P waves that cycle predicts between the first and last mark were actually
+        // found. The fit above divides every interval by its nearest whole multiple of the base, with no
+        // limit on the multiple, so a few scattered deflections always "fit" some base: 5 marks at
+        // 1562, 2978, 3704, 7958, 8598 ms read as regular P at 85/min (4254 ms = 6 × 709) on a real
+        // tracing, and made a complete block out of it (coverage 0.42). Dissociation needs ≥ 0.6: the synthetic
+        // complete blocks, whose P waves partly hide in the QRS and T, reach 0.75-0.83.
+        out.pCoverage = +(A.length / (1 + (A[A.length - 1].tMs - A[0].tMs) / base)).toFixed(2);
     }
     out.afVeto = out.anyEctopic || (rrPeriod != null && rrPeriod >= 2) || regularity === 'regular';
     if (!A.length || n < 2) return out;
@@ -128,7 +135,7 @@ export function measureRhythm(beats = [], atrial = [], params = null) {
     else out.relation = 'variable';
 
     // AV dissociation: regular P waves that keep no fixed relation to the QRS
-    out.dissociated = A.length >= 3 && out.ppCV != null && out.ppCV <= 0.12 && !out.prFixed && out.relation !== '1:1'
+    out.dissociated = A.length >= 3 && out.ppCV != null && out.ppCV <= 0.12 && out.pCoverage >= 0.6 && !out.prFixed && out.relation !== '1:1'
         && (out.relation === 'V>A' || out.relation === 'variable' || out.relation === 'A>V' || (out.prSD != null && out.prSD > 60))
         && out.pqSweep != null && out.pqSweep >= 0.6 * Math.min(out.PP, RR ?? Infinity);
     if (out.dissociated && out.relation === 'variable') out.relation = 'dissociated';
