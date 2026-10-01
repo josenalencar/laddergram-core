@@ -57,6 +57,10 @@ export const TIER_CATALOG = Object.freeze({
     LAF: { label: 'LAF', rank: 5.6, h: 22, kind: 'ventricular', group: 'fascicles' },
     LPF: { label: 'LPF', rank: 5.7, h: 22, kind: 'ventricular', group: 'fascicles' },
     V: { label: 'V', rank: 6, h: 42, kind: 'ventricular' },
+    // The pacemaker: not a structure of the heart but the device's timing row (a marker channel), drawn under
+    // the ventricle in the paced reading only — its stimuli and the intervals that time them (AV delay, V–A,
+    // lower rate). Optional; other readings leave it empty.
+    PM: { label: 'PM', rank: 7, h: 30, kind: 'both' },
 });
 export const DEFAULT_TIERS = Object.freeze(['SN', 'A', 'AV', 'His', 'V']);
 /** @deprecated use DEFAULT_TIERS / ladder.tiers */
@@ -93,7 +97,7 @@ function tierContext(list) {
         lvl: (t, f) => idx[t] + f,
         av: dual ? 'AVf' : 'AV',          // where antegrade AV-nodal conduction runs
         avLow: dual ? 'AVs' : 'AV',       // the band touching the His / branches
-        hasSN: has('SN'), hasHis: has('His'), hasBB: has('RBB'), hasFasc: has('LAF'),
+        hasSN: has('SN'), hasHis: has('His'), hasBB: has('RBB'), hasFasc: has('LAF'), hasPM: has('PM'),
     };
 }
 
@@ -101,7 +105,9 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.26.1';   // = package.json version (test_versions.mjs)
+export const ENGINE_VERSION = '1.27.0';   // = package.json version (test_versions.mjs)
+/** The plausibility rules (rhythm.js) as their own versioned component — history in rhythm.js and the viewer's js/versions.js. */
+export const PLAUSIBILITY_VERSION = 'P2';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -136,6 +142,7 @@ export const DEFAULT_PARAMS = Object.freeze({
     AVI: null,         // pacing: AV delay (sensed or paced P → paced QRS); null = from your marks
     PVARP: 250,        // pacing: post-ventricular atrial refractory period (the device ignores a P inside it)
     VRP: 250,          // pacing: ventricular refractory period (the device ignores a QRS inside it)
+    saBlock: 0,        // sinoatrial exit block on the SN tier: 0 = none, 1 = type I (SA Wenckebach), 2 = type II
 });
 
 /** Labels/units for the params panel. `adv` = hidden under "advanced". */
@@ -166,11 +173,12 @@ export const PARAM_INFO = {
     AVI: { kind: 'clinical', label: 'AV delay (empty = from your marks)', unit: 'ms', what: 'P (sensed or paced) → paced QRS in a dual-chamber device' },
     PVARP: { kind: 'assumed', label: 'PVARP', unit: 'ms', normal: [200, 350], what: 'after each ventricular event the device ignores atrial activity this long (it is not tracked)' },
     VRP: { kind: 'assumed', label: 'VRP', unit: 'ms', normal: [200, 300], what: 'after each ventricular event the device ignores ventricular activity this long' },
+    saBlock: { kind: 'assumed', needsTier: ['SN'], label: 'SA exit block (0 none, 1 type I, 2 type II)', unit: '', what: 'a sinus pause read as a sinus discharge that did not leave the node: type II keeps the sinus cycle (the pause is a multiple of it), type I lengthens the SA conduction before the drop (SA Wenckebach)' },
 };
 
 const ALWAYS = ['SACT', 'PA', 'HV', 'AHmin', 'PRmin', 'PRmax', 'wideQrsMs', 'concealDepth', 'blockDepth'];
 export const MECHANISMS = [
-    { id: 'avnodal', label: 'Sinus / AV conduction (1st-degree, Wenckebach, Mobitz II, 2:1)', params: [...ALWAYS, 'ectopicVA', 'blockBelowHis'] },
+    { id: 'avnodal', label: 'Sinus / AV conduction (1st-degree, Wenckebach, Mobitz II, 2:1)', params: [...ALWAYS, 'ectopicVA', 'blockBelowHis', 'saBlock'] },
     { id: 'avb3', label: 'Complete (3rd-degree) AV block', params: [...ALWAYS, 'blockBelowHis'] },
     { id: 'hisExtra', label: 'Concealed His extrasystoles (pseudo AV block)', params: [...ALWAYS, 'hPrimeLead'] },
     { id: 'avnrt', label: 'AVNRT — typical / atypical by VA', params: [...ALWAYS, 'VA'] },
@@ -423,7 +431,7 @@ function junctionTimes(B, qrsOn, own = null) {
 
 // Segment builders. Each takes the builder `B` first.
 
-function sinusEntry(B, a, { sn = true, focus = false } = {}) {
+function sinusEntry(B, a, { sn = true, focus = false, snT = null } = {}) {
     const { P, T } = B;
     if (focus) {
         // an atrial focus: the line starts de novo inside the atrial tier, nothing enters it
@@ -433,9 +441,12 @@ function sinusEntry(B, a, { sn = true, focus = false } = {}) {
     }
     if (sn && T.hasSN) {
         // The sinus dot sits one sinoatrial conduction time before the P: dragging it is setting SACT.
-        const h = { at: 'from', param: 'SACT', atrialId: a.id };
-        B.ev('SN', a.tMs - P.SACT, 0.5, { role: 'sn', atrialId: a.id, timeHandle: h });
-        B.seg(['SN', a.tMs - P.SACT, 0.5], ['A', a.tMs, 0], { atrialId: a.id, role: 'sa', timeHandle: h });
+        // (In SA exit block the discharge times come from the sinus cycle instead, and are not a handle.)
+        const own = snT != null && Math.abs(snT - (a.tMs - P.SACT)) > 0.5;
+        const h = own ? undefined : { at: 'from', param: 'SACT', atrialId: a.id };
+        const t0 = own ? snT : a.tMs - P.SACT;
+        B.ev('SN', t0, 0.5, { role: 'sn', atrialId: a.id, timeHandle: h });
+        B.seg(['SN', t0, 0.5], ['A', a.tMs, 0], { atrialId: a.id, role: 'sa', timeHandle: h });
     }
     B.ev('A', a.tMs, 0, { role: 'p', atrialId: a.id, source: a.source || 'auto' });
     B.seg(['A', a.tMs, 0], ['A', a.tMs, 1], { atrialId: a.id, role: 'atrium' });
@@ -620,6 +631,90 @@ function rrStats(beats) {
     return { rr, med: median(rr) };
 }
 
+// ─── sinoatrial exit block ──────────────────────────────────────────────────
+
+/**
+ * Sinoatrial exit block from the P–P series alone: the sinus discharge is not on the ECG, its exit is.
+ * A pause is a P–P at least 1.4 × the basic cycle (the median of the others), entered abruptly (at least
+ * 1.35 × the P–P before it): the shape a dropped P gives, not the gradual swing of a sinus arrhythmia.
+ *   type II — every pause a whole multiple (2 or 3, ± 10 %) of the basic cycle: the node kept its rhythm,
+ *             one exit failed;
+ *   type I  — every pause shorter than twice the P–P before it and no multiple of the basic one (≤ 1.85 ×):
+ *             SA Wenckebach, the exit time grows, the P–P shorten before the drop.
+ * The same rule as the rhythm detector's R11 sinoatrialBlock (which adds waveform checks), on the marks.
+ * It also places the sinus node for the SN tier: type II on the basic cycle; type I on the one sinus cycle
+ * that makes each group whole (the group's span plus its pause is n + 1 cycles, the SA conduction back at
+ * its first value after the drop). `force` (1 or 2) draws that type even when the pauses do not say it.
+ * @returns {{ kind: 1|2|null, basicMs, pauses: [{ i, ppMs, ratio }], snOf: Map<atrialId, number>, blocked: number[], why } | null}
+ */
+export function sinoatrialPattern(atrial, { sact = DEFAULT_PARAMS.SACT, force = 0 } = {}) {
+    const A = atrial.filter(a => !isPacedMark(a)).slice().sort(byT);
+    if (A.length < 4) return null;
+    const pp = A.slice(1).map((a, i) => a.tMs - A[i].tMs);
+    const med0 = median(pp);
+    const long = pp.map(x => x >= 1.4 * med0);
+    // the basic cycle: neither a pause, nor a premature cycle (a PAC), nor the cycle after one (its reset)
+    const premature = pp.map(x => x < 0.8 * med0);
+    const rest = pp.filter((x, i) => !long[i] && !premature[i] && !(i > 0 && premature[i - 1]));
+    if (rest.length < 3 || !long.some(Boolean)) return null;
+    const basic = median(rest);
+    const mu = rest.reduce((a, x) => a + x, 0) / rest.length;
+    const restCv = Math.sqrt(rest.reduce((a, x) => a + (x - mu) ** 2, 0) / rest.length) / mu;
+    const pauses = [];
+    for (let i = 0; i < pp.length; i++) {
+        if (!long[i]) continue;
+        const prev = i > 0 && !long[i - 1] ? pp[i - 1] : null;
+        // a premature P before the pause (a PAC and its reset) is not an exit block
+        if (prev != null && prev < 0.8 * med0) return null;
+        if (prev != null && pp[i] < 1.35 * prev && !force) return null;
+        pauses.push({ i, ppMs: pp[i], prev, ratio: +(pp[i] / basic).toFixed(2) });
+    }
+    const mult = (p) => { const m = Math.round(p.ppMs / basic); return m >= 2 && m <= 3 && Math.abs(p.ppMs / basic - m) <= 0.1 * m ? m : 0; };
+    const t1 = (p) => !mult(p) && p.ppMs / basic <= 1.85 && (p.prev == null || p.ppMs < 2 * p.prev);
+    // type I on two such pauses, or on one in an otherwise steady sinus rhythm (the P–P off it within a CV of 0.06):
+    // one long cycle in a rhythm that varies anyway is more often a sinus arrhythmia or a hidden PAC
+    // (and not on one pause in a strip with PACs: a blocked PAC hidden in the T and the reset after it look the same)
+    let kind = pauses.every(mult) ? 2 : pauses.every(p => t1(p) || mult(p)) && pauses.some(t1) && (pauses.length >= 2 || (restCv <= 0.06 && !premature.some(Boolean))) ? 1 : null;
+    if (force === 1 || force === 2) kind = force;
+    const snOf = new Map(A.map(a => [a.id, a.tMs - sact]));
+    const blocked = [];
+    if (kind === 2) {
+        for (const p of pauses) {
+            const k = Math.max(2, Math.round(p.ppMs / basic));
+            for (let j = 1; j < k; j++) blocked.push(r1(A[p.i].tMs - sact + j * p.ppMs / k));
+        }
+    } else if (kind === 1) {
+        // groups of conducted discharges, each closed by a pause
+        const ends = pauses.map(p => p.i);
+        let s = 0, lastCycle = basic;
+        for (let g = 0; g <= ends.length; g++) {
+            const e = g < ends.length ? ends[g] : A.length - 1;
+            const closed = g < ends.length;
+            const c = closed ? (A[e + 1].tMs - A[s].tMs) / (e - s + 2) : lastCycle;
+            const S = (i) => A[s].tMs - sact + (i - s) * c;
+            // the SA conduction must grow through the group; otherwise the node is drawn at the plain SA time
+            const sacts = [];
+            for (let i = s; i <= e; i++) sacts.push(A[i].tMs - S(i));
+            const grows = sacts.every((x, k) => x >= sact - 5 && x <= 400 && (k === 0 || x >= sacts[k - 1] - 5));
+            if (grows) for (let i = s; i <= e; i++) snOf.set(A[i].id, r1(S(i)));
+            if (closed) blocked.push(r1(grows ? S(e + 1) : A[e].tMs - sact + pp[e] / 2));
+            if (closed) lastCycle = c;
+            s = e + 1;
+        }
+    }
+    const fmt = pauses.map(p => `${Math.round(p.ppMs)} ms (${p.ratio}×)`).join(', ');
+    const why = kind === 2 ? `sinus pause(s) of ${fmt}, a whole multiple of the basic P–P (${Math.round(basic)} ms): SA exit block type II`
+        : kind === 1 ? `abrupt sinus pause(s) of ${fmt}, shorter than twice the P–P before and no multiple of the basic one (${Math.round(basic)} ms): SA exit block type I (SA Wenckebach)`
+        : `sinus pause(s) of ${fmt} that fit neither type of SA exit block`;
+    return { kind, basicMs: Math.round(basic), pauses: pauses.map(p => ({ i: p.i, ppMs: Math.round(p.ppMs), ratio: p.ratio })), snOf, blocked, why };
+}
+
+/** A sinus discharge that did not leave the node: a dot on the SN tier and a line that stops inside it. */
+function saExitBlock(B, t) {
+    B.ev('SN', t, 0.5, { role: 'sn-blocked' });
+    B.seg(['SN', t, 0.5], ['SN', t + B.P.SACT * 0.6, 0.95], { terminal: 'block', role: 'sa-block' });
+}
+
 // ─── mechanisms ─────────────────────────────────────────────────────────────
 
 /**
@@ -692,6 +787,16 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
     const leading = new Set(vt ? atrial.filter(a => !beatOfA.has(a.id) && !claimedRetro.has(a.id) && a.tMs < firstQ).map(a => a.id) : []);
 
     const pattern = classifyConduction(atrial, beatOfA, ahOf, new Set([...claimedRetro, ...truncated, ...leading]), ectopicOnsets);
+    // What the conduction pattern is, for anyone reading the ladder (the rhythm rules read it, never redraw it)
+    B.L.conduction = { twoToOne: pattern.twoToOne, wenckebach: pattern.wenckebach, mobitz2: pattern.mobitz2.size,
+                       pac: pattern.pac, blocked: pattern.blocked, explained: pattern.explained, maxRunBlocked: pattern.maxRunBlocked ?? 0 };
+    // Sinoatrial exit block (SN tier, saBlock 1 or 2): where the node fired for each P, and where it fired in vain
+    const sa = T.hasSN && P.saBlock >= 1 && !atFocus && !vt
+        ? sinoatrialPattern(atrial.filter(a => !claimedRetro.has(a.id)), { sact: P.SACT, force: P.saBlock >= 1.5 ? 2 : 1 }) : null;
+    if (sa) {
+        for (const t of sa.blocked) saExitBlock(B, t);
+        B.L.saBlock = { kind: sa.kind, basicMs: sa.basicMs, pauses: sa.pauses, blocked: sa.blocked.length };
+    }
 
     for (const a of atrial) {
         if (claimedRetro.has(a.id)) continue;   // drawn by its ectopic beat
@@ -700,7 +805,7 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
             B.seg(['A', a.tMs, 1], ['A', a.tMs, 0], { atrialId: a.id, role: 'atrium-edge' });
             continue;
         }
-        sinusEntry(B, a, { focus: atFocus });
+        sinusEntry(B, a, { focus: atFocus, snT: sa ? sa.snOf.get(a.id) : null });
         const tIn = a.tMs;                      // the atrial tier is instantaneous: the AV band starts at P onset (PH)
         if (truncated.has(a.id)) {
             B.seg([T.av, tIn, 0], [T.av, Math.min(input.durationMs, tIn + P.AHmin), 0.4], { terminal: 'open', atrialId: a.id, role: 'av-open' });
@@ -776,6 +881,8 @@ function buildAvNodal(B, input, { excludeWide = false, vt = false, atFocus = fal
     if (pattern.wenckebach) B.note(`Progressive AH prolongation before a blocked P (${pattern.wenckebach}×) — Wenckebach (Mobitz I), block drawn in the AV node.`);
     if (pattern.pac) B.note(`${pattern.pac} premature P without a QRS — non-conducted PAC (blocked in the AV node), not AV block.`);
     if (pattern.mobitz2.size) B.note(`Blocked P after a constant AH (${pattern.mobitz2.size}×) — Mobitz II pattern, block drawn ${T.hasHis ? 'below the His' : 'at the bottom of the AV junction'}.`);
+    if (sa) B.note(`Sinoatrial exit block, type ${sa.kind === 2 ? 'II' : 'I'} as drawn: ${sa.why}. ${sa.blocked.length} sinus discharge(s) did not leave the node (SN tier); the surface ECG shows only the missing P.`, sa.kind ? 'info' : 'caution', 'sa-block');
+    else if (P.saBlock >= 1 && !T.hasSN) B.note('SA exit block is drawn on the SN tier: add it.', 'caution', 'tier-missing');
     const nOther = pattern.blocked - pattern.explained;
     if (nOther > 0) B.note(`${nOther} P wave(s) without a QRS in the PR window — drawn as blocked in the AV node.`, 'caution', 'p-blocked');
     const unpaired = beats.filter(b => !pairs.has(b.id));
@@ -795,7 +902,10 @@ function vtNotes(B, beats, atrial, pairs, ectopic) {
     for (let i = 1; i < atrial.length; i++) pp.push(atrial[i].tMs - atrial[i - 1].tMs);
     const ar = median(pp);
     const captures = beats.filter(b => pairs.has(b.id) && !ectopic(b)).length;
-    B.note(`Ventricular tachycardia: ${wide.length} wide beat(s)${vr ? ` at ${Math.round(60000 / vr)} /min` : ''}, each drawn from a ventricular focus with concealed retrograde conduction into the AV node.`);
+    // the same drawing names itself by its rate: tachycardia > 100 /min, accelerated idioventricular 50–100, escape below
+    const vRate = vr ? Math.round(60000 / vr) : null;
+    const vName = vRate == null || vRate > 100 ? 'Ventricular tachycardia' : vRate >= 50 ? 'Accelerated idioventricular rhythm' : 'Ventricular escape rhythm';
+    B.note(`${vName}: ${wide.length} wide beat(s)${vr ? ` at ${vRate} /min` : ''}, each drawn from a ventricular focus with concealed retrograde conduction into the AV node.`);
     if (atrial.length >= 2) B.note(`AV dissociation: P waves at ${ar ? Math.round(60000 / ar) : '—'} /min march through independently; those that meet the refractory node are blocked there.`);
     else B.note('Automatic P markers are ignored in VT: mark the dissociated P waves (+ P onset, then “Repeat every … ms”) to draw the AV dissociation.', 'info', 'vt-auto-p-ignored');
     const narrowUnpaired = beats.filter(b => !ectopic(b) && !pairs.has(b.id)).length;
@@ -827,6 +937,8 @@ function classifyConduction(atrial, beatOfA, ahOf, claimedRetro, ectopicOnsets) 
     const blockedIdx = [];
     seq.forEach((s, i) => { if (!s.cond) blockedIdx.push(i); });
     const blocked = blockedIdx.length;
+    let maxRunBlocked = 0;
+    for (let i = 0, run = 0; i < seq.length; i++) { run = seq[i].cond ? 0 : run + 1; maxRunBlocked = Math.max(maxRunBlocked, run); }
     const pp = [];
     for (let i = 1; i < seq.length; i++) pp.push(seq[i].a.tMs - seq[i - 1].a.tMs);
     const medPP = median(pp);
@@ -837,7 +949,7 @@ function classifyConduction(atrial, beatOfA, ahOf, claimedRetro, ectopicOnsets) 
     const twoToOne = blockedIdx.length >= 2 && blockedIdx.every((i, k) =>
         i > 0 && seq[i - 1].cond && (i + 1 >= seq.length || seq[i + 1].cond) &&
         (k === 0 || i - blockedIdx[k - 1] === 2) && !premature(i));
-    if (twoToOne) return { mobitz2, wenckeRun, wenckebach: 0, pac: 0, twoToOne: true, blocked, explained: blocked };
+    if (twoToOne) return { mobitz2, wenckeRun, wenckebach: 0, pac: 0, twoToOne: true, blocked, explained: blocked, maxRunBlocked };
 
     for (const i of blockedIdx) {
         const t = seq[i].a.tMs;
@@ -862,7 +974,7 @@ function classifyConduction(atrial, beatOfA, ahOf, claimedRetro, ectopicOnsets) 
             explained++;
         }
     }
-    return { mobitz2, wenckeRun, wenckebach, pac, twoToOne: false, blocked, explained };
+    return { mobitz2, wenckeRun, wenckebach, pac, twoToOne: false, blocked, explained, maxRunBlocked };
 }
 
 /** A P that crosses the node and the His (H recorded at tH) and dies just below it; without a His tier, low in the node. */
@@ -1068,7 +1180,8 @@ function buildFlutter(B, input) {
     const { P } = B;
     const beats = input.beats.slice().sort(byQ);
     const atrial = input.atrial.slice().sort(byT);
-    const marks = atrial.filter(a => a.source === 'user');
+    // the F onsets you marked, and the ones the rhythm detector placed (source 'engine') until you remove them
+    const marks = atrial.filter(a => a.source === 'user' || a.source === 'engine');
     let cyc, phase, fit = null;
     if (P.fWaveMs != null) {
         cyc = Math.max(120, P.fWaveMs);
@@ -1144,7 +1257,10 @@ function buildJt(B, input) {
         atrialRetro(B, tA, { beatId: b.id });
     }
     B.L.intervals = measureIntervals(beats, [], new Map(), P).map(iv => ({ ...iv, VAms: P.VA }));
-    B.note(`Junctional tachycardia: each cycle starts de novo at a focus in the AV node, conducting down to the ventricles and up to the atria (VA ${P.VA} ms). With 1:1 retrograde conduction the tracing is the same as a reentrant one — only the absence of closure differs.`);
+    const { med } = rrStats(beats);
+    const jRate = med ? Math.round(60000 / med) : null;
+    const jName = jRate == null || jRate > 100 ? 'Junctional tachycardia' : jRate > 60 ? 'Accelerated junctional rhythm' : 'Junctional escape rhythm';
+    B.note(`${jName}: each cycle starts de novo at a focus in the AV node, conducting down to the ventricles and up to the atria (VA ${P.VA} ms). With 1:1 retrograde conduction the tracing is the same as a reentrant one — only the absence of closure differs.`);
 }
 
 /**
@@ -1259,15 +1375,20 @@ function stimulus(B, tier, t, frac, o = {}) {
  * activated — drawn as a dashed, preempted stub. The device's timing (AV delay, PVARP, VRP) is shaded by
  * periods.js; the lower rate interval is stated.
  */
-function buildPaced(B, input) {
-    const { P, T } = B;
-    const beats = input.beats.slice().sort(byQ);
-    const atrial = input.atrial.slice().sort(byT);
+/**
+ * What the marks say about the device: the mode, the P each paced QRS tracked, the lower rate interval and
+ * the AV delay. Pure; the paced reading draws from it and the rhythm rules rank the pacing readings with it.
+ * @returns {{ mode: 'AAI'|'VVI'|'DDD'|null, tracking, trackOf: Map, avis: number[], lriMs, lriMeasuredMs, aviMs,
+ *             aPacedN, vPacedN, native, vPaced, pairs, beatOfA }}
+ */
+export function readPacing(beatsIn = [], atrialIn = [], params = null) {
+    const P = params && params.wideQrsMs != null && params.PRmax != null ? params : resolveParams(params);
+    const beats = beatsIn.slice().sort(byQ);
+    const atrial = atrialIn.slice().sort(byT);
     const native = beats.filter(b => !isPacedMark(b)), vPaced = beats.filter(isPacedMark);
     const aPacedN = atrial.filter(isPacedMark).length;
     const { pairs } = pairAtrialToBeats(native, atrial, P);
     const beatOfA = new Map([...pairs].map(([bId, aId]) => [aId, bId]));
-    const bById = new Map(beats.map(b => [b.id, b]));
 
     // The P each paced QRS follows, if the device is tracking: the last free P in the window before it, and
     // only when those delays agree — a P that merely happens to precede a VVI beat is not tracked.
@@ -1282,6 +1403,65 @@ function buildPaced(B, input) {
     const tracking = avis.length >= 2 ? aviSpread <= 50 : avis.length === 1 && (vPaced.length === 1 || aPacedN > 0);
     if (!tracking) trackOf = new Map();
     const mode = aPacedN && (vPaced.length || tracking) ? 'DDD' : aPacedN ? 'AAI' : vPaced.length && tracking ? 'DDD' : vPaced.length ? 'VVI' : null;
+    // the paced-to-paced cycle is the lower rate only where the device is escaping: under atrial tracking the
+    // ventricle follows the sinus rate
+    const cyclesOf = (list) => { const d = []; for (let i = 1; i < list.length; i++) if (isPacedMark(list[i]) && isPacedMark(list[i - 1])) d.push((list[i].tMs ?? list[i].qrsOnMs) - (list[i - 1].tMs ?? list[i - 1].qrsOnMs)); return d; };
+    const rateChamber = aPacedN ? atrial : beats;
+    const lriMeasuredMs = mode === 'DDD' && !aPacedN ? null : median(cyclesOf(rateChamber));
+    const lriMs = P.LRI ?? lriMeasuredMs;
+    // the AV delay: tracked P → paced QRS; with paced atria, the paced P → its paced QRS
+    const apv = [];
+    if (aPacedN) for (const a of atrial.filter(isPacedMark)) {
+        const v = vPaced.find(b => b.qrsOnMs > a.tMs + 40 && b.qrsOnMs - a.tMs <= window);
+        if (v) apv.push(v.qrsOnMs - a.tMs);
+    }
+    const aviMs = P.AVI ?? (avis.length && tracking ? median(avis) : apv.length ? median(apv) : null);
+    return { mode, tracking, trackOf, avis, lriMs, lriMeasuredMs, aviMs, aPacedN, vPacedN: vPaced.length, native, vPaced, pairs, beatOfA };
+}
+
+/**
+ * The PM tier: the device as a marker channel. Atrial events on the upper line (AP a stimulus, AS a sensed P
+ * the device tracked), ventricular events on the lower one (VP a stimulus, VS a sensed QRS); a sloped line is
+ * the AV delay the device timed from an atrial event to its ventricular stimulus, a dashed one the V–A interval
+ * that ran out in an atrial stimulus, or (VVI) the lower rate interval that ran out in a ventricular one. Each
+ * interval is labelled once. Nothing here is a structure of the heart: it is what the device counted.
+ */
+function pacemakerRow(B, beats, atrial, trackOf, mode) {
+    const A = 0.28, V = 0.78;
+    const aEv = [];
+    for (const a of atrial) {
+        if (isPacedMark(a)) { B.ev('PM', a.tMs, A, { style: 'stim', role: 'pm-ap', atrialId: a.id }); aEv.push({ t: a.tMs, paced: true, id: a.id }); }
+        else if (trackOf.has(a.id)) { B.ev('PM', a.tMs, A, { role: 'pm-as', atrialId: a.id }); aEv.push({ t: a.tMs, paced: false, id: a.id }); }
+    }
+    const vEv = beats.map(b => ({ t: b.qrsOnMs, paced: isPacedMark(b), id: b.id }));
+    for (const v of vEv) B.ev('PM', v.t, V, v.paced ? { style: 'stim', role: 'pm-vp', beatId: v.id } : { role: 'pm-vs', beatId: v.id });
+    const said = new Set();
+    const lab = (k, ms) => { if (said.has(k)) return null; said.add(k); return `${k} ${Math.round(ms)}`; };
+    // AV delay: an atrial event to the paced QRS it timed
+    for (const a of aEv) {
+        const v = vEv.find(x => x.paced && x.t > a.t + 40 && x.t - a.t <= AVI_WINDOW_MS + 60);
+        if (!v || vEv.some(x => x.t > a.t && x.t < v.t)) continue;
+        B.seg(['PM', a.t, A], ['PM', v.t, V], { role: 'pm-avi', atrialId: a.id, beatId: v.id, label: lab('AVI', v.t - a.t) });
+    }
+    // V–A: a ventricular event to the atrial stimulus that ended the wait
+    for (const a of aEv.filter(x => x.paced)) {
+        const v = vEv.filter(x => x.t < a.t).pop();
+        if (v && a.t - v.t <= 2500) B.seg(['PM', v.t, V], ['PM', a.t, A], { style: 'dashed', role: 'pm-va', atrialId: a.id, beatId: v.id, label: lab('VA', a.t - v.t) });
+    }
+    // VVI: the lower rate interval, ventricular event to the next ventricular stimulus
+    if (mode === 'VVI') for (let i = 1; i < vEv.length; i++) {
+        if (!vEv[i].paced) continue;
+        B.seg(['PM', vEv[i - 1].t, V], ['PM', vEv[i].t, V], { style: 'dashed', role: 'pm-lri', beatId: vEv[i].id, label: lab('LRI', vEv[i].t - vEv[i - 1].t) });
+    }
+}
+
+function buildPaced(B, input) {
+    const { P, T } = B;
+    const beats = input.beats.slice().sort(byQ);
+    const atrial = input.atrial.slice().sort(byT);
+    const R = readPacing(beats, atrial, P);
+    const { native, vPaced, aPacedN, pairs, beatOfA, trackOf, avis, tracking, mode } = R;
+    const bById = new Map(beats.map(b => [b.id, b]));
 
     for (const a of atrial) {
         if (isPacedMark(a)) {
@@ -1315,15 +1495,11 @@ function buildPaced(B, input) {
 
     // The device's timing, as far as the marks show it.
     const vEvents = beats.map(b => b.qrsOnMs);
-    const cyclesOf = (list) => { const d = []; for (let i = 1; i < list.length; i++) if (isPacedMark(list[i]) && isPacedMark(list[i - 1])) d.push((list[i].tMs ?? list[i].qrsOnMs) - (list[i - 1].tMs ?? list[i - 1].qrsOnMs)); return d; };
-    // the paced-to-paced cycle is the lower rate only where the device is escaping: under atrial tracking the
-    // ventricle follows the sinus rate
-    const rateChamber = aPacedN ? atrial : beats;
-    const lriMeasured = mode === 'DDD' && !aPacedN ? null : median(cyclesOf(rateChamber));
-    const lri = P.LRI ?? lriMeasured;
+    const lriMeasured = R.lriMeasuredMs, lri = R.lriMs;
     const avi = P.AVI ?? (avis.length && tracking ? median(avis) : null);
     B.L.pacing = { mode, lriMs: lri != null ? r1(lri) : null, aviMs: avi != null ? r1(avi) : null, pvarpMs: P.PVARP, vrpMs: P.VRP,
                    tracked: [...trackOf].map(([aId, b]) => ({ atrialId: aId, beatId: b.id })) };
+    if (T.hasPM && mode) pacemakerRow(B, beats, atrial, trackOf, mode);
 
     if (!mode) {
         B.note('No mark is flagged as paced: open the card of a paced P or QRS (the one after the stimulus) and flag it as paced.', 'caution', 'paced-none');
@@ -1387,11 +1563,81 @@ function conductionNotes(B, beats) {
     }
 }
 
+/** The segments of a strip read as more than one rhythm, cleaned: in time order, a known mechanism, no overlap. */
+export function cleanSegments(list) {
+    if (!Array.isArray(list)) return null;
+    const out = list.filter(x => x && Number.isFinite(+x.fromMs) && Number.isFinite(+x.toMs) && +x.toMs > +x.fromMs)
+        .map(x => ({ fromMs: r1(+x.fromMs), toMs: r1(+x.toMs), mechanism: RULES[x.mechanism] ? x.mechanism : 'avnodal',
+                     ...(x.params && typeof x.params === 'object' ? { params: { ...x.params } } : {}),
+                     ...(x.label ? { label: String(x.label) } : {}), ...(x.reading ? { reading: String(x.reading) } : {}) }))
+        .sort((a, b) => a.fromMs - b.fromMs);
+    for (let i = 1; i < out.length; i++) out[i].fromMs = Math.max(out[i].fromMs, out[i - 1].toMs);
+    return out.length >= 2 ? out : null;
+}
+
+/**
+ * A strip read as more than one rhythm (`input.segments`: [{ fromMs, toMs, mechanism, params?, label? }]).
+ * Each stretch is drawn with its own mechanism from the marks inside it: a beat by its QRS onset, a P with
+ * the beat it conducts (paired over the whole strip, so the P before the first beat of a stretch stays with
+ * that beat), any other P by its own time. Schematic elements a builder draws without a mark (the f and F
+ * waves) are kept only inside their own stretch. A dashed line across every tier marks where the mechanism
+ * changes. The ladder's `mechanism` is the longest stretch's; `segments` lists them all.
+ */
+function buildSegmented(input) {
+    const segs = cleanSegments(input.segments);
+    if (!segs) return buildLadder({ ...input, segments: null });
+    const P0 = resolveParams(input.params);
+    const beats = input.beats || [], atrial = input.atrial || [];
+    const segOf = (t) => {
+        const k = segs.findIndex(sg => t >= sg.fromMs && t < sg.toMs);
+        return k >= 0 ? k : t < segs[0].fromMs ? 0 : segs.length - 1;
+    };
+    const { pairs } = pairAtrialToBeats(beats.filter(b => b.quality !== 'pvc'), atrial, P0);
+    const bSeg = new Map(beats.map(b => [b.id, segOf(b.qrsOnMs)]));
+    const aSeg = new Map([...pairs].map(([bId, aId]) => [aId, bSeg.get(bId)]));
+    for (const a of atrial) if (!aSeg.has(a.id)) aSeg.set(a.id, segOf(a.tMs));
+    const tiers = normalizeTiers(input.tiers);
+    const out = { tiers, mechanism: null, params: P0, events: [], paths: [], intervals: [], notes: [], claims: [], segments: [] };
+    let longest = -1;
+    segs.forEach((sg, k) => {
+        const bs = beats.filter(b => bSeg.get(b.id) === k), as = atrial.filter(a => aSeg.get(a.id) === k);
+        const L = buildLadder({ ...input, segments: null, mechanism: sg.mechanism, params: { ...(input.params || {}), ...(sg.params || {}) },
+                                beats: bs, atrial: as, durationMs: k === segs.length - 1 ? input.durationMs : sg.toMs });
+        const ids = new Set([...bs.map(b => b.id), ...as.map(a => a.id)]);
+        const lo = k === 0 ? -Infinity : sg.fromMs, hi = k === segs.length - 1 ? Infinity : sg.toMs;
+        const mine = (x, t0, t1) => ids.has(x.beatId) || ids.has(x.atrialId) || (Math.min(t0, t1) >= lo && Math.max(t0, t1) <= hi);
+        for (const e of L.events) if (mine(e, e.tMs, e.tMs)) out.events.push({ ...e, id: `s${k}${e.id}` });
+        for (const p of L.paths) if (mine(p, p.from.tMs, p.to.tMs)) out.paths.push({ ...p, id: `s${k}${p.id}` });
+        out.intervals.push(...L.intervals);
+        const tag = `${sg.label || sg.mechanism} (${Math.round(sg.fromMs / 100) / 10}–${Math.round(sg.toMs / 100) / 10} s)`;
+        for (const c of L.claims) { const text = `${tag}: ${c.text}`; out.notes.push(text); out.claims.push({ ...c, text }); }
+        for (const key of ['flutter', 'pacing', 'conduction', 'saBlock']) if (L[key] && !out[key]) out[key] = L[key];
+        if (L.unknownMechanism) out.unknownMechanism = L.unknownMechanism;
+        out.segments.push({ ...sg, nBeats: bs.length, nAtrial: as.length });
+        if (longest < 0 || sg.toMs - sg.fromMs > segs[longest].toMs - segs[longest].fromMs) longest = k;
+    });
+    out.mechanism = segs[longest].mechanism;
+    // where the mechanism changes: one dashed line through every tier, labelled with what comes next
+    for (let k = 1; k < segs.length; k++) {
+        const t = segs[k].fromMs;
+        out.paths.push({ id: `cut${k}`, beatId: null, atrialId: null, from: { tier: tiers[0], tMs: t, frac: 0 }, to: { tier: tiers[tiers.length - 1], tMs: t, frac: 1 },
+                         style: 'dashed', terminal: 'point', arrow: 'none', curve: 0, label: `→ ${segs[k].label || segs[k].mechanism}`, color: null, role: 'segment-cut' });
+    }
+    const qOf = new Map(beats.map(b => [b.id, b.qrsOnMs]));
+    out.intervals.sort((a, b) => (qOf.get(a.beatId) ?? 0) - (qOf.get(b.beatId) ?? 0));
+    const note = `The strip is read as ${segs.length} rhythms: ${segs.map(sg => `${sg.label || sg.mechanism} ${Math.round(sg.fromMs / 100) / 10}–${Math.round(sg.toMs / 100) / 10} s`).join(', ')} — each stretch is drawn with its own mechanism; the dashed line is where it changes.`;
+    out.notes.unshift(note); out.claims.unshift({ level: 'info', code: 'segments', text: note });
+    assignKeys(out);
+    out.engine = { name: ENGINE_NAME, version: ENGINE_VERSION, plausibility: PLAUSIBILITY_VERSION };
+    return out;
+}
+
 /**
  * Build the ladder.
  * @param {{beats:object[], atrial:object[], mechanism:string, params?:object, tiers?:string[], durationMs?:number}} input
  */
 export function buildLadder(input) {
+    if (Array.isArray(input.segments) && input.segments.filter(Boolean).length >= 2) return buildSegmented(input);
     const mechanism = RULES[input.mechanism] ? input.mechanism : 'avnodal';
     const P = resolveParams(input.params);
     const T = tierContext(normalizeTiers(input.tiers));
@@ -1406,7 +1652,7 @@ export function buildLadder(input) {
     }
     conductionNotes(B, beats);
     assignKeys(B.L);
-    B.L.engine = { name: ENGINE_NAME, version: ENGINE_VERSION };
+    B.L.engine = { name: ENGINE_NAME, version: ENGINE_VERSION, plausibility: PLAUSIBILITY_VERSION };
     return B.L;
 }
 

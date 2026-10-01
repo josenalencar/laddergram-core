@@ -18,7 +18,7 @@
  * (stacked interpretations of one strip) follow one another, each line
  * tagged with its `group`.
  */
-import { TIER_CATALOG, CONDUCTIONS, normalizeTiers, ENGINE_NAME, ENGINE_VERSION } from './engine.js';
+import { TIER_CATALOG, CONDUCTIONS, normalizeTiers, cleanSegments, ENGINE_NAME, ENGINE_VERSION, PLAUSIBILITY_VERSION } from './engine.js';
 import { makeLayout, capLines } from './render.js';
 import { cleanEp } from './egm.js';
 import { cleanPeriods } from './periods.js';
@@ -40,15 +40,21 @@ const beatOut = (b) => ({ id: b.id, qrsOnMs: b.qrsOnMs, qrsOffMs: b.qrsOffMs, rP
                           ...(b.noConductedP ? { noConductedP: true } : {}),
                           ...(b.params && Object.keys(b.params).length ? { params: { ...b.params } } : {}),
                           ...(b.pairedAtrialId ? { pairedAtrialId: String(b.pairedAtrialId) } : {}),
-                          ...(b.retroAtrialId ? { retroAtrialId: String(b.retroAtrialId) } : {}) });
+                          ...(b.retroAtrialId ? { retroAtrialId: String(b.retroAtrialId) } : {}),
+                          // what made the beat: a paced QRS, a capture or a fusion (the readings draw them differently)
+                          ...(ORIGINS.includes(b.origin) ? { origin: b.origin } : {}),
+                          ...(Number.isFinite(b.focusDelayMs) ? { focusDelayMs: b.focusDelayMs } : {}) });
 const atrialOut = (a) => ({ id: a.id, tMs: a.tMs, source: a.source || 'auto',
-                            ...(a.blockedAt === 'AV' || a.blockedAt === 'His' ? { blockedAt: a.blockedAt } : {}) });
+                            ...(a.blockedAt === 'AV' || a.blockedAt === 'His' ? { blockedAt: a.blockedAt } : {}),
+                            ...(a.origin === 'paced' ? { origin: 'paced' } : {}) });
+const ORIGINS = ['paced', 'capture', 'fusion'];
 
 export function toLaddergramJson({ filename = null, lead = null, fs = null, durationMs = null, speed = null,
                                    beats, atrial, mechanism, params, tiers = null, ladder, layers = [], title = '', caption = '', style = 'bands', brackets = null,
-                                   periods = null, styleOverrides = null, hiddenKeys = null, ep = null }) {
+                                   periods = null, styleOverrides = null, hiddenKeys = null, ep = null, segments = null, reading = null }) {
     return {
         format: FORMAT, version: FORMAT_VERSION, createdAt: new Date().toISOString(),
+        engine: { name: ENGINE_NAME, version: ENGINE_VERSION, plausibility: PLAUSIBILITY_VERSION },
         source: { filename, lead, fs, durationMs },
         display: { speedMmS: speed },
         mechanism, params, tiers: normalizeTiers(tiers || ladder?.tiers), title: title || '', caption: caption || '', style: cleanStyle(style) || 'bands',
@@ -58,6 +64,9 @@ export function toLaddergramJson({ filename = null, lead = null, fs = null, dura
         ...(cleanHidden(hiddenKeys) ? { hiddenKeys: cleanHidden(hiddenKeys) } : {}),
         // the EP view the reading was shown in (catheters, block order, sweep speed): it travels with the file
         ...(cleanEp(ep) ? { ep: cleanEp(ep) } : {}),
+        // a strip read as more than one rhythm, and the named reading (a subtype of the mechanism: Mobitz I, 2:1…)
+        ...(cleanSegments(segments) ? { segments: cleanSegments(segments) } : {}),
+        ...(typeof reading === 'string' && reading ? { reading } : {}),
         beats: beats.map(beatOut),
         atrial: atrial.map(atrialOut),
         ladder: { tiers: ladder.tiers, events: ladder.events, paths: ladder.paths, intervals: ladder.intervals, notes: ladder.notes },
@@ -118,7 +127,7 @@ export function fromLaddergramJson(obj) {
              title: String(obj.title || ''), caption: String(obj.caption || ''), style: cleanStyle(obj.style) || 'bands',
              brackets: cleanBrackets(obj.brackets), periods: cleanPeriods(obj.periods),
              styleOverrides: cleanRestyle(obj.styleOverrides) || {}, hiddenKeys: cleanHidden(obj.hiddenKeys) || [],
-             ep: cleanEp(obj.ep) };
+             ep: cleanEp(obj.ep), segments: cleanSegments(obj.segments), reading: typeof obj.reading === 'string' ? obj.reading : null };
 }
 
 /** Clip a path to [tMin, tMax] on the time axis; null if nothing is left. `level` maps a point to its continuous height. */
@@ -418,7 +427,7 @@ export function toLewisLadderDiagram(ladders, { tMinMs, tMaxMs, style = 'bands',
                            text: firstNote.slice(0, 140), type: 'text', fontSize: 11, fontColor: '#1e293b' });
     }
     const out = { lines, points, connections, annotations, freeformLines: [], ladderMeta, ladderStyle: list[0]?.style ?? style, canvasHeight,
-                  layoutVersion: LEWIS.LAYOUT_VERSION, engine: { name: ENGINE_NAME, version: ENGINE_VERSION } };
+                  layoutVersion: LEWIS.LAYOUT_VERSION, engine: { name: ENGINE_NAME, version: ENGINE_VERSION, plausibility: PLAUSIBILITY_VERSION } };
     if (backgroundImage) {
         out.backgroundImage = backgroundImage;
         out.imageTransform = { x: 0, y: 0, scaleX: 1, scaleY: 1 };

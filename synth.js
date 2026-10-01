@@ -389,6 +389,64 @@ export const SYNTH_SCENARIOS = [
           }
           return { durationMs: DUR, P, QRS, flutter: null, af: false };
       } },
+    // ── rhythms the rhythm detector names (laddergram-core 1.27, plausibility P2): each one's `reading` is the named
+    // reading (rhythm.js READINGS) the ladder should rank first on its marks.
+    { id: 'saBlockII', label: '2nd-degree SA exit block, type II', expect: 'avnodal', reading: 'sab2_type2',
+      hint: 'Sinus 70 /min, PR 160; one sinus P is missing and the pause is exactly two P–P: the node fired, its impulse did not leave it. Add the SN tier.',
+      timeline: () => {
+          const P = [], QRS = [];
+          for (let k = 0, t = 300; t < DUR - 200; k++, t += 860) { if (k === 5) continue; P.push({ t, kind: 'sinus' }); QRS.push({ t: t + 160, morph: 'normal' }); }
+          return { durationMs: DUR, P, QRS, flutter: null, af: false };
+      } },
+    { id: 'saBlockI', label: '2nd-degree SA exit block, type I (SA Wenckebach)', expect: 'avnodal', reading: 'sab2_type1',
+      hint: 'Sinus node every 860 ms; the SA conduction grows 60 → 140 → 180 ms, then one discharge does not exit: the P–P shorten (880, 840) and the pause (1480) is less than two of them.',
+      timeline: () => {
+          const P = [], QRS = [];
+          const sact = [60, 140, 180];
+          for (let g = 0, s0 = 240; s0 < DUR; g++, s0 += 4 * 860) {
+              for (let i = 0; i < 3; i++) { const t = s0 + i * 860 + sact[i]; if (t + 160 < DUR - 150) { P.push({ t, kind: 'sinus' }); QRS.push({ t: t + 160, morph: 'normal' }); } }
+          }
+          return { durationMs: DUR, P, QRS, flutter: null, af: false };
+      } },
+    { id: 'highGrade', label: 'High-grade AV block, 3:1', expect: 'avnodal', reading: 'avb_high',
+      hint: 'Sinus 94 /min; two P waves in a row are blocked, every third conducts with the same PR (200 ms).',
+      timeline: () => sinusTrain({ pp: 640, pr: 200, t0: 200, drop: k => k % 3 !== 0 }) },
+    { id: 'aai', label: 'AAI pacing, the ventricles conducted', expect: 'paced', reading: 'pacedAAI',
+      hint: 'Atrial stimuli every 1000 ms (60 /min), each paced P conducted with a PR of 220 ms.',
+      timeline: () => {
+          const P = [], QRS = [];
+          for (let t = 300; t < DUR - 400; t += 1000) { P.push({ t, kind: 'sinus', paced: true }); QRS.push({ t: t + 220, morph: 'normal' }); }
+          return { durationMs: DUR, P, QRS, flutter: null, af: false };
+      } },
+    { id: 'junctionalEscape', label: 'Junctional escape rhythm, 45 /min', expect: 'jt', reading: 'junctionalEscape',
+      hint: 'Narrow QRS every 1330 ms with no P before it: the sinus node is silent and the junction escapes.',
+      timeline: () => {
+          const QRS = [];
+          for (let t = 500; t < DUR - 300; t += 1330) QRS.push({ t, morph: 'normal' });
+          return { durationMs: DUR, P: [], QRS, flutter: null, af: false };
+      } },
+    { id: 'aivr', label: 'Accelerated idioventricular rhythm, 75 /min', expect: 'vt', reading: 'aivr',
+      hint: 'Wide QRS every 800 ms, no P: a ventricular focus faster than an escape and slower than a tachycardia.',
+      timeline: () => {
+          const QRS = [];
+          for (let t = 400; t < DUR - 300; t += 800) QRS.push({ t, morph: 'pvc' });
+          return { durationMs: DUR, P: [], QRS, flutter: null, af: false };
+      } },
+    { id: 'nsvt', label: 'Sinus rhythm with a run of non-sustained VT', expect: 'pvc', reading: 'nsvt', twoRhythms: true,
+      hint: 'Sinus 70 /min (PR 160); four wide beats at 150 /min interrupt it, the sinus P inside the run are blocked, then the sinus rhythm resumes.',
+      timeline: () => {
+          const P = [], QRS = [];
+          const pp = 860, pr = 160;
+          for (let k = 0, t = 250; t < DUR - 200; k++, t += pp) {
+              P.push({ t, kind: 'sinus' });
+              if (k >= 4 && k <= 5) continue;                 // the run takes these cycles
+              QRS.push({ t: t + pr, morph: 'normal' });
+          }
+          const start = 250 + 3 * pp + pr + 440;              // after the 4th sinus beat
+          for (let i = 0; i < 4; i++) QRS.push({ t: start + i * 400, morph: 'pvc' });
+          QRS.sort((a, b) => a.t - b.t);
+          return { durationMs: DUR, P, QRS: QRS.filter(q => q.t < DUR - 200), flutter: null, af: false };
+      } },
 ];
 
 /** A ready-to-load record for one scenario. */

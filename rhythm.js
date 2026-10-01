@@ -4,8 +4,24 @@
 //   suggestReading    — a first reading that is never one the marks exclude
 //   plausibleParams   — per-mechanism timings: measured from the marks when they can be, typical otherwise
 //   continueRhythm    — extend a pattern of 2–3 marked beats (and their P waves) to the end of the strip
+//   rankReadings      — every named reading (a mechanism and its subtype: Mobitz I, 2:1, SA block, AIVR, DDD…)
+//                       ranked by what the marks show and, when a caller has one, what a rhythm detector found
 // Pure functions; the thresholds are the textbook ones (Josephson; Issa, Miller & Zipes).
-import { DEFAULT_PARAMS, MECHANISMS, PR_FLOOR_MS, pairAtrialToBeats } from './engine.js';
+import { DEFAULT_PARAMS, MECHANISMS, PR_FLOOR_MS, PLAUSIBILITY_VERSION, pairAtrialToBeats, buildLadder, sinoatrialPattern, readPacing, fitFlutter } from './engine.js';
+
+/**
+ * The plausibility rules as a versioned component (the engine version moves with every drawing change; these
+ * move only when what the rules rule out, or how readings are ranked, changes).
+ *   P1  1.26  timing-only rules on the marks: measureRhythm, plausibility (ok / caution / excluded), suggestReading
+ *   P2  1.27  named readings (READINGS: AV block subtypes, SA exit block, flutter ratio, junctional escape, AIVR,
+ *             ventricular escape, NSVT, AAI / VVI / DDD) ranked by rankReadings from the marks' conduction pattern
+ *             (the engine's own Wenckebach / Mobitz II / 2:1 classification, high-grade runs, SA pauses, the F–F
+ *             ratio, the device's mode) and, optionally, a rhythm detector's evidence (the reading it called, its
+ *             alternatives and secondary findings, flutter / fibrillatory waves, the pacing mode, the stretches of
+ *             a strip with more than one rhythm). Evidence never excludes: only the marks rule a reading out.
+ *             Without evidence, plausibility's verdicts are exactly P1's.
+ */
+export { PLAUSIBILITY_VERSION };   // defined beside ENGINE_VERSION (engine.js), so every ladder is stamped with both
 
 export const VA_AP_MIN_MS = 70;      // VA ≤ 70 ms: too short for a circuit through the ventricle and a pathway
 export const WIDE_QRS_MS = 120;
@@ -152,8 +168,12 @@ export function measureRhythm(beats = [], atrial = [], params = null) {
 const AVRT_FAMILY = ['avrt', 'pjrt', 'avrtAnti'];
 const SVT_REGULAR = ['avnrt', 'avrt', 'pjrt', 'at', 'jt', 'avrtAnti'];
 
-/** Every mechanism → { status: 'ok' | 'caution' | 'excluded', reasons: [] }, plus the rhythm and a one-line summary. */
-export function plausibility(beats = [], atrial = [], params = null) {
+/**
+ * Every mechanism → { status: 'ok' | 'caution' | 'excluded', reasons: [] }, plus the rhythm and a one-line summary.
+ * `evidence` (optional, P2): what a rhythm detector found on the tracing (see rankReadings). It only adds reasons
+ * and cautions; a reading is excluded by the marks alone. Without it the verdicts are P1's, unchanged.
+ */
+export function plausibility(beats = [], atrial = [], params = null, evidence = null) {
     const m = measureRhythm(beats, atrial, params);
     const v = Object.fromEntries(MECHANISMS.map(x => [x.id, { status: 'ok', reasons: [] }]));
     const exclude = (ids, why) => ids.forEach(id => { v[id].status = 'excluded'; v[id].reasons.push(why); });
@@ -226,8 +246,22 @@ export function plausibility(beats = [], atrial = [], params = null) {
     }
     // a focal atrial tachycardia is under 240 /min; faster regular atrial activity is flutter
     if (m.relation !== 'none' && m.nP >= 3 && m.PP && m.PP < 250 && m.ppCV != null && m.ppCV <= 0.1) caution(['at'], `atrial rate ${Math.round(60000 / m.PP)}/min: a focal atrial tachycardia is under 240 /min — regular atrial activity this fast is flutter`);
+    if (evidence) evidenceReasons(evidence, v, caution);
 
     return { rhythm: m, verdicts: v, summary: rhythmSummary(m) };
+}
+
+/** P2: what the detector saw, said against the readings it bears on — reasons and cautions, never an exclusion. */
+function evidenceReasons(ev, v, caution) {
+    const src = ev.source ? `rhythm detector ${ev.source}` : 'rhythm detector';
+    const say = (ids, why) => ids.forEach(id => { if (v[id] && !v[id].reasons.includes(why)) v[id].reasons.push(why); });
+    const at = ev.atrial || {};
+    if (at.kind === 'flutter') caution(['afib'], `${src}: regular F waves${at.cycleMs ? ` every ${Math.round(at.cycleMs)} ms (${Math.round(60000 / at.cycleMs)}/min)` : ''} — organised atrial activity, not fibrillation`);
+    if (at.kind === 'fib') caution(['flutter', 'at'], `${src}: fibrillatory atrial waves${at.cycleMs ? ` (cycle ~${Math.round(at.cycleMs)} ms)` : ''} — no organised atrial rhythm`);
+    if (at.kind === 'sinus') caution(['afib'], `${src}: a sinus P at a steady PR — organised atrial activity, not fibrillation`);
+    if (ev.pacing && ev.pacing.mode) say(['paced'], `${src}: ${ev.pacing.mode} pacemaker${ev.pacing.lriMs ? `, lower rate ${Math.round(60000 / ev.pacing.lriMs)}/min` : ''} — accept its stimulus marks to draw it`);
+    const r = ev.reading && readingOf(ev.reading);
+    if (r) say([r.mechanism], `${src}: ${ev.label || r.label}${ev.confidence ? ` (${ev.confidence} confidence)` : ''}`);
 }
 
 export function rhythmSummary(m) {
@@ -272,8 +306,320 @@ export function suggestReading(beats = [], atrial = [], rhythm = {}, params = nu
     else if (m.anyEctopic) s = pick(['pvc'], 'ectopic beats marked');
     else if (m.regularity === 'irregular' && m.relation === 'none' && m.nBeats >= 6 && !m.afVeto) s = pick(['afib'], 'irregularly irregular RR and no P marked');
     else if (m.relation === 'A>V') s = pick(['avnodal'], 'P waves without a QRS — AV block (Wenckebach, Mobitz II or 2:1)');
+    // P2: a slow, regular rhythm of several beats with no P marked at all is a focus below the atria, named by its QRS
+    else if (!atrial.length && m.nBeats >= 4 && !m.tachy && m.regularity === 'regular') {
+        s = m.wide ? pick(['vt'], `a regular wide rhythm at ${m.rate}/min with no P marked — a ventricular focus (${m.rate >= 50 ? 'accelerated idioventricular rhythm' : 'ventricular escape'}); mark the P waves if there are any`)
+                   : pick(['jt'], `a regular narrow rhythm at ${m.rate}/min with no P marked — a junctional focus (${m.rate <= 60 ? 'junctional escape' : 'accelerated junctional rhythm'}); mark the P waves if there are any`);
+    }
     if (!s) s = pick(['avnodal', 'at', 'jt', 'vt'], m.relation === '1:1' || m.relation === 'none' ? 'P before each QRS' : 'sinus / AV conduction');
     return s ?? { id: 'avnodal', reason: 'default reading' };
+}
+
+// ─── named readings (P2) ────────────────────────────────────────────────────
+
+/** The families the readings group by, in the order a reader thinks about them. */
+export const READING_FAMILIES = ['Sinus & AV conduction', 'AV block', 'Narrow-QRS tachycardia', 'Wide-QRS tachycardia',
+    'Atrial arrhythmias', 'Escape & accelerated rhythms', 'Pacemaker'];
+
+/**
+ * Every reading the ladder can be asked to draw, by name. A reading is a MECHANISM (what the engine draws) and,
+ * for the subtypes, the parameters and tiers that make the drawing say it: Mobitz II drops below the His, SA
+ * exit block puts the blocked discharge on the SN tier, a pacemaker gets its timing row. The id of the plain
+ * reading of a mechanism is the mechanism's own id, so a file or a menu that only knows mechanisms still works.
+ */
+const RD = (id, mechanism, label, family, extra = {}) => Object.freeze({ id, mechanism, label, family, ...extra });
+export const READINGS = Object.freeze([
+    RD('avnodal', 'avnodal', 'Sinus / AV conduction', 'Sinus & AV conduction'),
+    RD('sab2_type1', 'avnodal', '2nd-degree SA exit block, type I (SA Wenckebach)', 'Sinus & AV conduction', { params: { saBlock: 1 }, tiers: ['SN'] }),
+    RD('sab2_type2', 'avnodal', '2nd-degree SA exit block, type II', 'Sinus & AV conduction', { params: { saBlock: 2 }, tiers: ['SN'] }),
+    RD('pvc', 'pvc', 'Sinus + ectopic beats', 'Sinus & AV conduction'),
+    RD('avb1', 'avnodal', '1st-degree AV block', 'AV block'),
+    RD('avb2_type1', 'avnodal', '2nd-degree AV block, Mobitz I (Wenckebach)', 'AV block'),
+    RD('avb2_type2', 'avnodal', '2nd-degree AV block, Mobitz II', 'AV block', { params: { blockBelowHis: 1 }, tiers: ['His'] }),
+    RD('avb2_1', 'avnodal', '2:1 AV block', 'AV block'),
+    RD('avb_high', 'avnodal', 'High-grade (advanced) AV block', 'AV block'),
+    RD('avb3', 'avb3', 'Complete (3rd-degree) AV block', 'AV block'),
+    RD('hisExtra', 'hisExtra', 'Concealed His extrasystoles (pseudo AV block)', 'AV block'),
+    RD('avnrt', 'avnrt', 'AVNRT', 'Narrow-QRS tachycardia'),
+    RD('avrt', 'avrt', 'Orthodromic AVRT', 'Narrow-QRS tachycardia'),
+    RD('pjrt', 'pjrt', 'PJRT', 'Narrow-QRS tachycardia'),
+    RD('at', 'at', 'Atrial tachycardia', 'Narrow-QRS tachycardia'),
+    RD('jt', 'jt', 'Junctional tachycardia', 'Narrow-QRS tachycardia'),
+    RD('vt', 'vt', 'Ventricular tachycardia', 'Wide-QRS tachycardia'),
+    RD('nsvt', 'pvc', 'Non-sustained ventricular tachycardia', 'Wide-QRS tachycardia'),
+    RD('avrtAnti', 'avrtAnti', 'Antidromic AVRT', 'Wide-QRS tachycardia'),
+    RD('afib', 'afib', 'Atrial fibrillation', 'Atrial arrhythmias'),
+    RD('flutter', 'flutter', 'Atrial flutter', 'Atrial arrhythmias'),
+    RD('ectopicAtrial', 'at', 'Ectopic atrial rhythm', 'Atrial arrhythmias'),
+    RD('junctionalEscape', 'jt', 'Junctional escape rhythm', 'Escape & accelerated rhythms'),
+    RD('aivr', 'vt', 'Accelerated idioventricular rhythm', 'Escape & accelerated rhythms'),
+    RD('vEscape', 'vt', 'Ventricular escape rhythm', 'Escape & accelerated rhythms'),
+    RD('paced', 'paced', 'Paced rhythm', 'Pacemaker'),
+    RD('pacedAAI', 'paced', 'Atrial pacing (AAI)', 'Pacemaker', { tiers: ['PM'] }),
+    RD('pacedVVI', 'paced', 'Ventricular pacing (VVI)', 'Pacemaker', { tiers: ['PM'] }),
+    RD('pacedDDD', 'paced', 'Dual-chamber pacing (DDD / VDD)', 'Pacemaker', { tiers: ['PM'] }),
+]);
+const READING_BY_ID = new Map(READINGS.map(r => [r.id, r]));
+/** The reading with this id, or null. */
+export const readingOf = (id) => READING_BY_ID.get(id) || null;
+
+/**
+ * The P → QRS conduction pattern of the marks, as the engine classifies it when it draws sinus / AV conduction
+ * (classifyConduction: Wenckebach = AH rising ≥ 30 ms over ≥ 2 conducted P before the drop; Mobitz II = constant
+ * AH around the drop; 2:1 = conducted and blocked P alternating; a premature blocked P is a PAC, not block),
+ * plus what the engine does not name: a run of ≥ 2 blocked P on the atrial schedule (high-grade block),
+ * P waves marching through (complete block), a long PR on every beat (1st degree).
+ * @returns {{ kind: 'normal'|'avb1'|'wenckebach'|'mobitz2'|'2:1'|'high-grade'|'complete'|'blocked'|null, ratio, prMs, blocked, why }}
+ */
+export function avConduction(beats = [], atrial = [], params = null) {
+    const B = beats.filter(b => b && b.origin !== 'paced'), A = atrial.filter(a => a && a.origin !== 'paced');
+    const out = { kind: null, ratio: null, prMs: null, blocked: 0, why: '' };
+    if (B.length < 2 || A.length < 2) { out.why = 'not enough marks'; return out; }
+    const m = measureRhythm(B, A, params);
+    // a regular atrial rhythm this fast is flutter: its F waves are not P waves the node blocks one by one
+    if (m.PP != null && m.PP < 350 && m.ppCV != null && m.ppCV <= 0.12) { out.why = 'atrial activity faster than 170/min'; return out; }
+    const L = buildLadder({ beats: B, atrial: A, mechanism: 'avnodal', params, tiers: ['A', 'AV', 'His', 'V'] });
+    const c = L.conduction || {};
+    const prs = L.intervals.map(i => i.PRms).filter(x => x != null);
+    out.prMs = prs.length ? Math.round(median(prs)) : null;
+    // P by P: conducted, blocked, or neither (the strip ended, or an ectopic beat explains it — a P inside or just
+    // after a ventricular extrasystole meets a refractory node: concealed conduction, not AV block)
+    const ectopicQ = B.filter(b => b.quality === 'pvc').map(b => b.qrsOnMs);
+    const conducted = new Set(L.paths.filter(p => p.role === 'av' && p.atrialId && p.beatId).map(p => p.atrialId));
+    const blockedIds = new Set(L.paths.filter(p => /^(av-block|av-block-low|his-block)$/.test(p.role) && p.atrialId).map(p => p.atrialId));
+    const seq = A.slice().sort(byT).map(a => ({ a, s: conducted.has(a.id) ? 'C' : blockedIds.has(a.id) && !ectopicQ.some(q => a.tMs >= q - 50 && a.tMs - q <= 500) ? 'B' : null }))
+        .filter(x => x.s);
+    // a P after the last QRS may have lost its QRS to the end of the strip, not to the node
+    const lastQ = Math.max(...B.map(b => b.qrsOnMs));
+    while (seq.length && seq[seq.length - 1].s === 'B' && seq[seq.length - 1].a.tMs > lastQ) seq.pop();
+    out.blocked = seq.filter(x => x.s === 'B').length - (c.pac || 0);
+    if (m.dissociated && m.RR && m.PP && m.RR > 1.1 * m.PP) {
+        out.kind = 'complete';
+        out.why = `P waves at ${Math.round(60000 / m.PP)}/min march through slower QRS (${m.rate}/min) at every PR`;
+        return out;
+    }
+    if (out.blocked <= 0) {
+        // nothing blocked that the node is to blame for
+        if (m.relation === '1:1' || (m.relation !== 'none' && prs.length >= 0.8 * B.filter(b => b.quality !== 'pvc').length) || m.anyEctopic) {
+            out.kind = out.prMs != null && out.prMs > 200 && !m.tachy ? 'avb1' : 'normal';
+            out.why = out.kind === 'avb1' ? `every P conducts, PR ${out.prMs} ms (> 200)` : `every P conducts${out.prMs != null ? `, PR ${out.prMs} ms` : ''}`;
+        }
+        out.blocked = 0;
+        return out;
+    }
+    // 2:1: conducted and blocked P alternate (the engine's own rule wants a conducted P on both sides of every
+    // blocked one; a strip that starts or ends on a blocked P is 2:1 too)
+    const str = seq.map(x => x.s).join('');
+    if (str.length >= 4 && !/CC|BB/.test(str) && (str.match(/B/g) || []).length >= 2 && (str.match(/C/g) || []).length >= 2) {
+        out.kind = '2:1'; out.ratio = '2:1'; out.why = `every other P conducts (PR ${out.prMs} ms), the other is blocked`; return out;
+    }
+    if (c.twoToOne) { out.kind = '2:1'; out.ratio = '2:1'; out.why = `every other P conducts (PR ${out.prMs} ms), the other is blocked`; return out; }
+    // runs of blocked P between two conducted ones (a run at either end of the strip may be cut short by it)
+    const inner = str.replace(/^B+|B+$/g, '');
+    const runB = Math.max(0, ...((inner.match(/B+/g) || str.match(/B+/g) || []).map(x => x.length)));
+    if (runB >= 2 && runB <= 5 && m.relation === 'A>V' && (str.match(/C/g) || []).length >= 2) {
+        out.kind = 'high-grade'; out.ratio = `${runB + 1}:1`;
+        out.why = `${runB} consecutive P waves blocked on the atrial schedule`;
+        return out;
+    }
+    if (c.wenckebach && c.wenckebach >= (c.mobitz2 || 0)) {
+        out.kind = 'wenckebach'; out.ratio = groupRatio(L, A);
+        out.why = `the PR lengthens before each blocked P (${c.wenckebach}×) and shortens after it`;
+        return out;
+    }
+    if (c.mobitz2) { out.kind = 'mobitz2'; out.ratio = groupRatio(L, A); out.why = `a P blocked after a constant PR (${c.mobitz2}×)`; return out; }
+    out.kind = 'blocked'; out.why = `${out.blocked} P wave(s) without a QRS, no pattern`;
+    return out;
+}
+
+/** "n+1:n" — the commonest group of conducted P between two blocked ones. */
+function groupRatio(L, A) {
+    const conducted = new Set(L.paths.filter(p => p.role === 'av' && p.atrialId && p.beatId).map(p => p.atrialId));
+    const runs = []; let run = 0;
+    for (const a of A.slice().sort(byT)) { if (conducted.has(a.id)) run++; else { if (run) runs.push(run); run = 0; } }
+    if (!runs.length) return null;
+    const freq = new Map(); for (const r of runs) freq.set(r, (freq.get(r) || 0) + 1);
+    const k = [...freq].sort((x, y) => y[1] - x[1] || y[0] - x[0])[0][0];
+    return `${k + 1}:${k}`;
+}
+
+/**
+ * Second-degree sinoatrial exit block from the P marks (sinoatrialPattern in the engine): only where every P
+ * conducts — a P missing because the AV node or a mark failed is something else.
+ * @returns {{ kind: 'sab2_type1'|'sab2_type2'|null, basicMs, pauses, why }}
+ */
+export function saConduction(beats = [], atrial = [], params = null) {
+    const A = atrial.filter(a => a && a.origin !== 'paced');
+    const out = { kind: null, basicMs: null, pauses: [], why: '' };
+    if (A.length < 5 || beats.length < 4) return out;
+    const m = measureRhythm(beats, A, params);
+    if (!(m.relation === '1:1' || m.prFixed) || m.tachy) return out;
+    const sa = sinoatrialPattern(A);
+    if (!sa || !sa.kind) return out;
+    // nothing inside the pause: a QRS there (an extrasystole, a run, an escape) hid a P or reset the node
+    const As = A.filter(a => a.origin !== 'paced').slice().sort(byT), pr = m.PR ?? 200;
+    for (const p of sa.pauses) {
+        const lo = As[p.i].tMs + pr + 80, hi = As[p.i + 1].tMs - 40;
+        if (beats.some(b => b.qrsOnMs > lo && b.qrsOnMs < hi)) return out;
+    }
+    return { kind: sa.kind === 2 ? 'sab2_type2' : 'sab2_type1', basicMs: sa.basicMs, pauses: sa.pauses, why: sa.why };
+}
+
+/** Flutter's conduction: the F–F cycle fitted to the F marks and how many F waves per QRS. */
+export function flutterConduction(beats = [], atrial = []) {
+    const out = { cycleMs: null, ratio: null, fixed: false };
+    const fit = atrial.length >= 2 ? fitFlutter(atrial) : null;
+    if (!fit || !(fit.cycleMs >= 160 && fit.cycleMs <= 350)) return out;
+    out.cycleMs = Math.round(fit.cycleMs);
+    const Q = beats.filter(b => b.quality !== 'pvc').map(b => b.qrsOnMs).sort((a, b) => a - b);
+    const ks = Q.slice(1).map((q, i) => Math.round((q - Q[i]) / fit.cycleMs)).filter(k => k >= 1);
+    if (!ks.length) return out;
+    const freq = new Map(); for (const k of ks) freq.set(k, (freq.get(k) || 0) + 1);
+    const [k, n] = [...freq].sort((x, y) => y[1] - x[1])[0];
+    out.fixed = n >= 0.8 * ks.length;
+    out.ratio = out.fixed ? `${k}:1` : 'variable';
+    return out;
+}
+
+const WEIGHT = { high: 1, medium: 0.75, low: 0.5 };
+/**
+ * Every named reading, ranked (P2). What the marks show comes first: their verdict on the reading's mechanism
+ * (an excluded mechanism ranks last whatever else is said), P1's suggestion, and the patterns P1 does not name —
+ * the AV conduction pattern, SA pauses, the flutter ratio, the device's mode, the rate that names an escape or
+ * accelerated rhythm, a run of ectopic beats. A subtype starts below its plain reading and passes it only on
+ * evidence of its own. Then, when the caller has one, a rhythm detector's evidence:
+ *   evidence = { source, reading, label, confidence: 'high'|'medium'|'low', alternatives: [readingId], secondary: [readingId],
+ *                atrial: { kind: 'sinus'|'ectopic'|'retro'|'flutter'|'fib'|'none', cycleMs }, pacing: { mode, lriMs, aviMs },
+ *                segments: [{ fromMs, toMs, reading }] }
+ * — reading ids are READINGS ids.
+ * @returns {{ ranked: [{ id, mechanism, label, family, score, status, reasons, params?, tiers? }], top, rhythm, verdicts,
+ *             conduction, sa, flutter, pacing, summary }}
+ */
+export function rankReadings(beats = [], atrial = [], { params = null, evidence = null } = {}) {
+    const ev = evidence || null;
+    const { rhythm: m, verdicts: V, summary } = plausibility(beats, atrial, params, ev);
+    const score = {}, why = {};
+    for (const r of READINGS) {
+        const st = V[r.mechanism]?.status ?? 'ok';
+        score[r.id] = (st === 'caution' ? 0.3 : 1) - (r.id === r.mechanism ? 0 : 0.6);
+        why[r.id] = [];
+    }
+    const add = (id, pts, reason) => { if (score[id] == null || !pts) return; score[id] += pts; if (reason && !why[id].includes(reason)) why[id].push(reason); };
+    const fam = (ids, pts, reason) => ids.forEach(id => add(id, pts, reason));
+    // support for a mechanism's plain reading supports its subtypes too (a 2:1 block IS sinus / AV conduction), a
+    // little less: a subtype then passes its plain reading only on evidence of its own
+    const addMech = (id, pts, reason) => {
+        add(id, pts, reason);
+        const r = readingOf(id);
+        if (r && r.id === r.mechanism) for (const x of READINGS) if (x.mechanism === r.mechanism && x.id !== r.id) add(x.id, 0.8 * pts, null);
+    };
+
+    // P1's suggestion, as a prior on its plain reading
+    const p1 = m.nBeats >= 2 ? suggestReading(beats, atrial, { afib: !!ev && (ev.atrial?.kind === 'fib' || ev.reading === 'afib') }, params) : null;
+    // ectopic beats flagged on the marks, which a detector with a validated extrasystole rule did not confirm (the
+    // marks' own ectopic flag over-calls on real tracings): the prior goes to sinus conduction, not to ectopy
+    const unconfirmedEctopy = p1 && p1.id === 'pvc' && ev && !(ev.secondary || []).includes('pvc') && !['pvc', 'nsvt'].includes(ev.reading);
+    if (p1 && !unconfirmedEctopy) addMech(p1.id, 2, p1.reason);
+    else if (p1) addMech('avnodal', 2, `${p1.reason}, but the rhythm detector finds no extrasystole: sinus conduction`);
+
+    // the device, from the marks flagged paced
+    const pacedMarks = beats.some(b => b && b.origin === 'paced') || atrial.some(a => a && a.origin === 'paced');
+    const pace = pacedMarks ? readPacing(beats, atrial, params) : null;
+    if (pace && pace.mode) add({ AAI: 'pacedAAI', VVI: 'pacedVVI', DDD: 'pacedDDD' }[pace.mode], 6,
+        `${pace.mode} from the paced marks${pace.lriMs ? `, lower rate ${Math.round(60000 / pace.lriMs)}/min` : ''}${pace.aviMs && pace.mode === 'DDD' ? `, AV delay ${Math.round(pace.aviMs)} ms` : ''}`);
+
+    // AV conduction and SA exit (sinus rhythm only: a tachycardia's P–QRS is the circuit's)
+    const cond = !pacedMarks && !m.tachy ? avConduction(beats, atrial, params) : { kind: null };
+    const AVK = { 'avb1': ['avb1', 3], 'wenckebach': ['avb2_type1', 3.5], 'mobitz2': ['avb2_type2', 3.5], '2:1': ['avb2_1', 3.5], 'high-grade': ['avb_high', 3.5], 'complete': ['avb3', 2.5] };
+    // A detector that reads AV block itself and called this strip plain sinus, with some confidence, is evidence
+    // against the block the marks suggest (its P marks are the same ones, read with more checks): the marks' pattern
+    // then counts for less, and the subtype needs the detector to name it.
+    const sinusCall = ev && ev.reading === 'avnodal' && (ev.confidence === 'high' || ev.confidence === 'medium')
+        && !(ev.secondary || []).includes(AVK[cond.kind]?.[0]) && ev.avBlockRules !== false;
+    // A 1st-degree block is named on a MEASURED PR: the caller's (evidence.prMs: the engine's adjudicated PQ, what
+    // the report rules read) when it has one, else the marks' own. Never on P the ladder placed at an averaged PR.
+    // Above 210 ms: 200 is the textbook limit and a PR within measurement error of it is not a block to name
+    // (laudo-checked on the PIT captures: PQ 204 unreported).
+    const prMeasured = ev ? ev.prMs ?? null : cond.prMs;
+    const avb1Ok = prMeasured != null && prMeasured > (ev ? 210 : 200);
+    if (AVK[cond.kind] && (cond.kind !== 'avb1' || avb1Ok)) add(AVK[cond.kind][0], sinusCall && cond.kind !== 'complete' ? 1.5 : AVK[cond.kind][1], `${cond.why}${cond.ratio ? ` (${cond.ratio})` : ''}`);
+    if (!avb1Ok) add('avb1', -3, null);
+    const sa = !pacedMarks && (cond.kind === 'normal' || cond.kind === 'avb1') ? saConduction(beats, atrial, params) : { kind: null };
+    if (sa.kind) add(sa.kind, 3.5, sa.why);
+
+    // flutter: its ratio names it
+    const fl = m.nP >= 2 ? flutterConduction(beats, atrial) : { ratio: null };
+
+    // the rate names what a focus does: tachycardia, accelerated, escape
+    const rate = m.rate;
+    const allEctopic = beats.length >= 3 && beats.every(b => b.quality === 'pvc' || ((b.qrsWidthMs ?? (b.qrsOffMs - b.qrsOnMs)) >= WIDE_QRS_MS && !b.conduction));
+    // A wide QRS after a P at a steady PR, 1:1, is conducted (a bundle-branch block), not idioventricular: AIVR, an
+    // escape or VT need AV dissociation or no P before each QRS. With a detector, the PR must be one the engine
+    // measured and the P not retrograde (a VT with 1:1 retrograde conduction also reads 1:1); a tachycardia over
+    // 150/min stays open. Marks alone: below 100/min.
+    const prOk = (x) => x != null && x >= 80 && x <= 300;
+    const wideConducted = m.wide && m.relation === '1:1' && m.prFixed && prOk(m.PR) && rate != null
+        && (ev ? prOk(ev.prMs) && Math.abs(ev.prMs - m.PR) <= 60 && ev.atrial?.kind !== 'retro' && rate <= 150 : !m.tachy);
+    if (wideConducted) {
+        fam(['vt', 'aivr', 'vEscape', 'junctionalEscape'], -6, null);
+        addMech('avnodal', 3, `a wide QRS after each P at a steady PR (${m.PR} ms${ev?.prMs ? `, measured PQ ${ev.prMs} ms` : ''}): conducted with a bundle-branch block, not a ventricular rhythm`);
+    }
+    // no P marked at all on a strip of several beats: nothing for sinus conduction to draw
+    if (!atrial.length && m.nBeats >= 4 && !m.tachy) add('avnodal', -1.5, null);
+    if (rate != null && !wideConducted && m.relation !== '1:1' && (allEctopic || (m.wide && (m.relation === 'none' || m.relation === 'dissociated' || m.relation === 'V>A')))) {
+        const id = rate > 100 ? 'vt' : rate >= 50 ? 'aivr' : 'vEscape';
+        fam(['vt', 'aivr', 'vEscape'].filter(x => x !== id), -1);
+        add(id, rate > 100 ? 0.5 : 2.5, `a wide, ventricular rhythm at ${rate}/min${rate > 100 ? '' : rate >= 50 ? ' (50–100: accelerated idioventricular)' : ' (< 50: ventricular escape)'}`);
+    }
+    if (rate != null && !m.wide && !m.tachy && (m.relation === 'none' || m.relation === 'V>A' || m.relation === 'dissociated' || (m.relation === '1:1' && m.rpClass === 'veryShort'))) {
+        const id = rate <= 60 ? 'junctionalEscape' : 'jt';
+        add(id === 'jt' ? 'junctionalEscape' : 'jt', -1);
+        add(id, id === 'jt' ? 0.5 : 2.5, `a narrow QRS at ${rate}/min without a P before it${rate <= 60 ? ' (≤ 60: a junctional escape)' : ' (an accelerated junctional rhythm)'}`);
+    }
+    if (rate != null && !m.tachy && m.relation === '1:1' && m.rpClass === 'long' && (V.at?.status !== 'excluded')) add('ectopicAtrial', 0.2);
+
+    // a run of ≥ 3 ectopic beats faster than 100/min among conducted ones: non-sustained VT
+    const Bs = beats.slice().sort(byQ);
+    let run = 0, best = 0, runRate = null;
+    for (let i = 0; i < Bs.length; i++) {
+        run = Bs[i].quality === 'pvc' ? run + 1 : 0;
+        if (run >= 3 && run > best) { best = run; const rr = Bs[i].qrsOnMs - Bs[i - 1].qrsOnMs; runRate = Math.round(60000 / rr); }
+    }
+    if (best >= 3 && Bs.some(b => b.quality !== 'pvc') && runRate > 100) add('nsvt', 3.5, `a run of ${best} ectopic beats at ~${runRate}/min among conducted beats`);
+
+    // the detector's evidence. For a reading whose mechanism the marks caution against, it counts for less: the
+    // marks are the ground truth the ladder is drawn from (a rate caution does not count against the readings the
+    // rate itself names: an escape, an accelerated or an ectopic atrial rhythm is not a tachycardia by definition)
+    if (ev) {
+        const RATE_NAMED = new Set(['aivr', 'vEscape', 'junctionalEscape', 'ectopicAtrial', 'jt']);
+        const damp = (id) => {
+            const r = readingOf(id), v = r && V[r.mechanism];
+            if (!v || v.status !== 'caution') return 1;
+            const own = v.reasons.filter(x => !/^rhythm detector/.test(x));        // the marks' cautions, not the evidence's own reasons
+            return RATE_NAMED.has(id) && own.every(x => /not a tachycardia/.test(x)) ? 1 : 0.4;
+        };
+        const add0 = add, addMech0 = addMech;
+        const addE = (id, pts, reason) => add0(id, pts * damp(id), reason);
+        const addMechE = (id, pts, reason) => { const k = damp(id); addMech0(id, pts * k, reason); };
+        const w = WEIGHT[ev.confidence] ?? 0.6, src = ev.source ? `rhythm detector ${ev.source}` : 'rhythm detector';
+        if (ev.reading) addMechE(ev.reading, 3.5 * w, `${src}: ${ev.label || readingOf(ev.reading)?.label || ev.reading} (${ev.confidence || '?'} confidence)`);
+        (ev.alternatives || []).forEach((id, i) => addMechE(id, Math.max(0.3, 1.2 - 0.4 * i) * w, `${src}: an alternative`));
+        (ev.secondary || []).forEach(id => { if (id !== 'avb1' || avb1Ok) addE(id, 3, `${src}: ${readingOf(id)?.label || id}`); });
+        const k = ev.atrial?.kind;
+        if (k === 'flutter') addE('flutter', 2, `${src}: regular F waves${ev.atrial.cycleMs ? ` every ${Math.round(ev.atrial.cycleMs)} ms` : ''}`);
+        if (k === 'fib') addE('afib', 2, `${src}: fibrillatory atrial waves`);
+        if (ev.pacing?.mode) addE({ AAI: 'pacedAAI', VVI: 'pacedVVI', DDD: 'pacedDDD', VDD: 'pacedDDD', DDI: 'pacedDDD' }[ev.pacing.mode] || 'paced', 2, `${src}: ${ev.pacing.mode} pacemaker`);
+    }
+
+    const order = new Map(READINGS.map((r, i) => [r.id, i]));
+    const ranked = READINGS.map(r => {
+        const v = V[r.mechanism] || { status: 'ok', reasons: [] };
+        const label = r.id === 'flutter' && fl.ratio ? `Atrial flutter, ${fl.ratio === 'variable' ? 'variable conduction' : fl.ratio}`
+            : (r.id === 'avb2_type1' || r.id === 'avb2_type2' || r.id === 'avb_high') && cond.ratio && AVK[cond.kind]?.[0] === r.id ? `${r.label}, ${cond.ratio}`
+            : r.id === 'jt' && rate != null && rate <= 100 && !m.tachy ? 'Accelerated junctional rhythm' : r.label;
+        return { ...r, label, score: +score[r.id].toFixed(2), status: v.status, reasons: [...new Set([...why[r.id], ...v.reasons])] };
+    }).sort((a, b) => (a.status === 'excluded') - (b.status === 'excluded') || b.score - a.score || order.get(a.id) - order.get(b.id));
+    return { ranked, top: ranked[0], rhythm: m, verdicts: V, conduction: cond, sa, flutter: fl, pacing: pace ? { mode: pace.mode, lriMs: pace.lriMs, aviMs: pace.aviMs } : null, summary };
 }
 
 // ─── timings per mechanism ──────────────────────────────────────────────────

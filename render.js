@@ -810,8 +810,9 @@ export function drawLadderGroup(ctx, view, layout, g, ladder, { selected = null,
 export function resolveMarkers({ beats = [], atrial = [] }, view, layout, { selected = null, visible = () => true } = {}) {
     const isSel = (kind, id) => !!(selected && selected.kind === kind && selected.id === id);
     const out = [];
-    for (const a of atrial) if (visible(a.tMs)) out.push({ x: Math.round(view.xOf(a.tMs)) + 0.5, color: COL_P, sel: isSel('atrial', a.id), user: a.source === 'user', tierTop: layout.bands.A.top });
-    for (const b of beats) if (visible(b.qrsOnMs)) out.push({ x: Math.round(view.xOf(b.qrsOnMs)) + 0.5, color: COL_Q, sel: isSel('beat', b.id), user: b.source === 'user', tierTop: layout.bands.V.top });
+    // engine: a mark a rhythm detector placed for the reader to accept, move or delete (drawn with a dashed handle)
+    for (const a of atrial) if (visible(a.tMs)) out.push({ x: Math.round(view.xOf(a.tMs)) + 0.5, color: COL_P, sel: isSel('atrial', a.id), user: a.source === 'user', tierTop: layout.bands.A.top, ...(a.source === 'engine' ? { engine: true } : {}) });
+    for (const b of beats) if (visible(b.qrsOnMs)) out.push({ x: Math.round(view.xOf(b.qrsOnMs)) + 0.5, color: COL_Q, sel: isSel('beat', b.id), user: b.source === 'user', tierTop: layout.bands.V.top, ...(b.source === 'engine' ? { engine: true } : {}) });
     return out;
 }
 
@@ -843,6 +844,11 @@ export function drawMarkerPx(ctx, m, strip, markerLines) {
     ctx.fillStyle = sel ? COL_SEL : color;
     ctx.beginPath(); ctx.moveTo(x, foot - 9); ctx.lineTo(x - 5, foot); ctx.lineTo(x + 5, foot); ctx.closePath();
     if (user) { ctx.fillStyle = COLORS.HOLLOW; ctx.fill(); ctx.strokeStyle = sel ? COL_SEL : color; ctx.lineWidth = 1.5; ctx.stroke(); }
+    else if (m.engine) {
+        // a detector's proposal: half-filled, dashed outline — not the reader's yet
+        ctx.globalAlpha = 0.45; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.setLineDash([2, 2]); ctx.strokeStyle = sel ? COL_SEL : color; ctx.lineWidth = 1.3; ctx.stroke(); ctx.setLineDash([]);
+    }
     else ctx.fill();
 }
 
