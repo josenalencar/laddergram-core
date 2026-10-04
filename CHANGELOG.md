@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.27.1 — 2026-10-04 (plausibility P2.1)
+
+`rankReadings` names a 1st-degree AV block at a measured PR > 200 ms (the definition: PR > 200 ms), with or
+without a detector's evidence; P2 required > 210 ms when evidence was passed. The PR must still be measured
+(the caller's `evidence.prMs`, else the marks' own), never one the ladder filled in at an averaged PR.
+
 ## 1.27.0 — 2026-10-01 (plausibility P2)
 
 The plausibility rules become a versioned component of their own (`PLAUSIBILITY_VERSION`, P1 → P2), stamped

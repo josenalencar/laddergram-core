@@ -538,10 +538,9 @@ export function rankReadings(beats = [], atrial = [], { params = null, evidence 
         && !(ev.secondary || []).includes(AVK[cond.kind]?.[0]) && ev.avBlockRules !== false;
     // A 1st-degree block is named on a MEASURED PR: the caller's (evidence.prMs: the engine's adjudicated PQ, what
     // the report rules read) when it has one, else the marks' own. Never on P the ladder placed at an averaged PR.
-    // Above 210 ms: 200 is the textbook limit and a PR within measurement error of it is not a block to name
-    // (laudo-checked on the PIT captures: PQ 204 unreported).
+    // Above 200 ms (P2.1, José's definition: 1st-degree AV block = PR > 200 ms; P2 used 210 with evidence).
     const prMeasured = ev ? ev.prMs ?? null : cond.prMs;
-    const avb1Ok = prMeasured != null && prMeasured > (ev ? 210 : 200);
+    const avb1Ok = prMeasured != null && prMeasured > 200;
     if (AVK[cond.kind] && (cond.kind !== 'avb1' || avb1Ok)) add(AVK[cond.kind][0], sinusCall && cond.kind !== 'complete' ? 1.5 : AVK[cond.kind][1], `${cond.why}${cond.ratio ? ` (${cond.ratio})` : ''}`);
     if (!avb1Ok) add('avb1', -3, null);
     const sa = !pacedMarks && (cond.kind === 'normal' || cond.kind === 'avb1') ? saConduction(beats, atrial, params) : { kind: null };

@@ -105,9 +105,9 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.27.0';   // = package.json version (test_versions.mjs)
+export const ENGINE_VERSION = '1.27.1';   // = package.json version (test_versions.mjs)
 /** The plausibility rules (rhythm.js) as their own versioned component — history in rhythm.js and the viewer's js/versions.js. */
-export const PLAUSIBILITY_VERSION = 'P2';
+export const PLAUSIBILITY_VERSION = 'P2.1';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {

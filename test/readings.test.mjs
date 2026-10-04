@@ -28,7 +28,7 @@ function truthMarks(id) {
 }
 
 section('the catalogue');
-ok(`PLAUSIBILITY_VERSION is P2 (${PLAUSIBILITY_VERSION})`, PLAUSIBILITY_VERSION === 'P2');
+ok(`PLAUSIBILITY_VERSION is P2.1 (${PLAUSIBILITY_VERSION})`, PLAUSIBILITY_VERSION === 'P2.1');
 ok('every reading draws with a mechanism the engine knows', READINGS.every(r => MECHANISMS.some(m => m.id === r.mechanism)));
 ok('every mechanism has its plain reading (id = mechanism id)', MECHANISMS.every(m => readingOf(m.id)?.mechanism === m.id));
 ok('every reading is in a family', READINGS.every(r => READING_FAMILIES.includes(r.family)));
@@ -122,8 +122,9 @@ section('evidence ranks, never excludes');
     const r5 = rankReadings(a1.beats, a1.atrial, { evidence: { reading: 'avnodal', confidence: 'high', secondary: ['avb1'], prMs: 300 } });
     ok(`1st-degree: the detector's silence keeps the plain reading (${r4.top.id}); its call names it (${r5.top.id})`, r4.top.id === 'avnodal' && r5.top.id === 'avb1');
     const r5b = rankReadings(a1.beats, a1.atrial, { evidence: { reading: 'avnodal', confidence: 'high', secondary: ['avb1'], prMs: 172 } });
-    const r5c = rankReadings(a1.beats, a1.atrial, { evidence: { reading: 'avnodal', confidence: 'high', secondary: ['avb1'], prMs: 204 } });
-    ok(`1st-degree needs a measured PR > 210: not at a measured PQ of 172 (${r5b.top.id}) nor 204 (${r5c.top.id}), whatever the marks or the detector say`, r5b.top.id === 'avnodal' && r5c.top.id === 'avnodal');
+    const r5c = rankReadings(a1.beats, a1.atrial, { evidence: { reading: 'avnodal', confidence: 'high', secondary: ['avb1'], prMs: 200 } });
+    const r5c2 = rankReadings(a1.beats, a1.atrial, { evidence: { reading: 'avnodal', confidence: 'high', secondary: ['avb1'], prMs: 204 } });
+    ok(`1st-degree needs a measured PR > 200: not at a measured PQ of 172 (${r5b.top.id}) nor 200 (${r5c.top.id}), whatever the marks or the detector say; named at 204 (${r5c2.top.id})`, r5b.top.id === 'avnodal' && r5c.top.id === 'avnodal' && r5c2.top.id === 'avb1');
     const lb = truthMarks('lbbb');
     const r5d = rankReadings(lb.beats, lb.atrial, { evidence: { reading: 'aivr', confidence: 'high', prMs: 180, atrial: { kind: null } } });
     ok(`a wide QRS after each P at a steady PR is conducted (bundle-branch block), even against an AIVR call (${r5d.top.id})`, r5d.top.id === 'avnodal');
