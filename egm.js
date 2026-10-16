@@ -32,11 +32,16 @@ export const CATHETERS = Object.freeze([
     { id: 'CS34', label: 'CS 3-4', what: 'coronary sinus, pair 3-4' },
     { id: 'CS12', label: 'CS 1-2', what: 'coronary sinus, distal pair (lateral mitral annulus)' },
     { id: 'RVa', label: 'RVa', what: 'right ventricular apex' },
+    // the bundle branches (for bundle-branch re-entry and the atriofascicular pathway): not in the default set
+    { id: 'RB', label: 'RB', what: 'right bundle potential, on the right septum below the His (sharp, ≥ 20 ms after the H, no atrial electrogram)' },
+    { id: 'LB', label: 'LB', what: 'left bundle potential, on the left septum (a catheter in the left ventricle)' },
 ]);
 export const CATHETER_IDS = Object.freeze(CATHETERS.map(c => c.id));
-export const DEFAULT_CATHETERS = CATHETER_IDS;
+/** The bundle-branch catheters: placed on request, so every figure drawn before them is unchanged. */
+export const BRANCH_CATHETERS = Object.freeze(['RB', 'LB']);
+export const DEFAULT_CATHETERS = Object.freeze(CATHETER_IDS.filter(id => !BRANCH_CATHETERS.includes(id)));
 /** Every channel a schedule records: the His catheter as one bipole, or as its proximal and distal pairs. */
-export const EGM_CHANNELS = Object.freeze(['HRA', 'His', 'Hisp', 'Hisd', 'CS910', 'CS78', 'CS56', 'CS34', 'CS12', 'RVa']);
+export const EGM_CHANNELS = Object.freeze(['HRA', 'His', 'Hisp', 'Hisd', 'CS910', 'CS78', 'CS56', 'CS34', 'CS12', 'RVa', 'RB', 'LB']);
 export const CHANNEL_LABELS = EGM_CHANNEL_LABELS;
 const CS = ['CS910', 'CS78', 'CS56', 'CS34', 'CS12'];
 const HIS = ['His', 'Hisp', 'Hisd'];
@@ -75,7 +80,7 @@ export const EGM_COLORS = Object.freeze({
     II: '#f8fafc', V1: '#86efac',
     HRA: '#facc15', His: '#fb923c', Hisp: '#fdba74', Hisd: '#fb923c',
     CS910: '#a5f3fc', CS78: '#67e8f9', CS56: '#22d3ee', CS34: '#38bdf8', CS12: '#60a5fa',
-    RVa: '#f472b6', Stim: '#ffffff',
+    RVa: '#f472b6', RB: '#c4b5fd', LB: '#a78bfa', Stim: '#ffffff',
 });
 
 /**
@@ -229,9 +234,15 @@ export function activationDeflections(act, P = resolveParams({})) {
         push('His', 'H', t, HIS_AMP.H.His, false, extra);
         push('Hisp', 'H', t, HIS_AMP.H.Hisp, false, extra);
         push('Hisd', 'H', t + HIS_DISTAL_LAG, HIS_AMP.H.Hisd, false, extra);
+    } else if (act.kind === 'RB' || act.kind === 'LB') {
+        // a bundle-branch potential: sharp, on its own catheter only
+        push(act.kind, act.kind, t, 0.6);
     } else if (act.kind === 'V') {
         const q = ventricularSequence(act.origin);
         push('HRA', 'V', t + 35, 0.12, true);
+        // the bundle-branch catheters lie on the septum: the local ventricle, right then left
+        push('RB', 'V', t + q.HisV + 5, 0.8);
+        push('LB', 'V', t + (q.CS910 + q.HisV) / 2, 0.8);
         push('His', 'V', t + q.HisV, HIS_AMP.V.His);
         push('Hisp', 'V', t + q.HisV, HIS_AMP.V.Hisp);
         push('Hisd', 'V', t + q.HisV, HIS_AMP.V.Hisd);
@@ -254,7 +265,7 @@ const near = (a, b, tol = 1.5) => Math.abs(a - b) <= tol;
  * Every chamber and His activation a ladder draws, with where it came from.
  * @returns [{ kind: 'A'|'f'|'H'|'V', tMs, origin, beatId, atrialId, retro?, prime? }] sorted by time
  */
-export function ladderActivations(L, { apSite = 'leftLateral', vOrigin = 'RV', atSite = 'highRA', beats = [] } = {}) {
+export function ladderActivations(L, { apSite = 'leftLateral', vOrigin = 'RV', atSite = 'highRA', beats = [], branches = false } = {}) {
     const acts = [];
     const beatById = new Map(beats.map(b => [b.id, b]));
     let nf = 0;
@@ -292,13 +303,24 @@ export function ladderActivations(L, { apSite = 'leftLateral', vOrigin = 'RV', a
         acts.push(h);
     }
 
+    // the bundle branches: the potential where the catheter sits, mid-branch, in whichever direction it runs
+    // (only when a bundle-branch catheter is placed: the schedule must not depend on the tiers drawn)
+    if (branches) for (const p of L.paths) {
+        if (p.from.tier !== p.to.tier || (p.from.tier !== 'RBB' && p.from.tier !== 'LBB')) continue;
+        if (p.role !== 'bb' && p.role !== 'bb-retro') continue;
+        acts.push({ kind: p.from.tier === 'RBB' ? 'RB' : 'LB', tMs: r1((p.from.tMs + p.to.tMs) / 2), beatId: p.beatId ?? null, atrialId: null, ...(p.role === 'bb-retro' ? { retro: true } : {}) });
+    }
+
     const preExcited = new Set(L.paths.filter(p => p.role === 'ap-ante').map(p => p.beatId));
+    // readings whose QRS has a morphology of its own: the atriofascicular pathway enters the right bundle
+    // (LBBB-like), bundle-branch re-entry goes down one branch (LBBB- or RBBB-like)
+    const mechOrigin = L.mechanism === 'atriofascicular' ? 'LBBB' : L.mechanism === 'bbrt' ? (L.bbrt?.morphology || 'LBBB') : null;
     const conducted = new Set();
     for (const e of L.events) {
         if (e.role !== 'qrs') continue;
         conducted.add(e.beatId);
         const c = String(beatById.get(e.beatId)?.conduction || '');
-        const origin = preExcited.has(e.beatId) ? AP_VENT[apSite] : c.includes('RBBB') ? 'RBBB' : c.includes('LBBB') ? 'LBBB' : 'normal';
+        const origin = mechOrigin ?? (preExcited.has(e.beatId) ? AP_VENT[apSite] : c.includes('RBBB') ? 'RBBB' : c.includes('LBBB') ? 'LBBB' : 'normal');
         acts.push({ kind: 'V', tMs: e.tMs, origin, beatId: e.beatId, atrialId: null });
     }
     // a ventricular focus with no conducted QRS of its own (a fusion beat has both: it is drawn conducted)
@@ -321,6 +343,8 @@ export const EGM_KERNELS = (() => {
     const raw = {
         A: [[3, 2.2, 0.45], [9, 2.6, -1], [16, 3, 0.8], [24, 3.5, -0.3]],
         H: [[2, 1.1, 0.5], [5.5, 1.3, -1], [9, 1.5, 0.45]],
+        RB: [[2, 1.1, 0.5], [5.5, 1.3, -1], [9, 1.5, 0.45]],
+        LB: [[2, 1.1, 0.5], [5.5, 1.3, -1], [9, 1.5, 0.45]],
         V: [[5, 3, 0.4], [14, 3.6, 1], [25, 4.5, -0.85], [38, 6, 0.3]],
         Afar: [[10, 6, 0.6], [24, 8, -0.35]],
         Vfar: [[14, 9, 0.7], [38, 12, -0.5]],
@@ -357,11 +381,12 @@ const kernelOf = (d) => (d.kind === 'A' ? (d.far ? 'Afar' : 'A') : d.kind === 'V
 export function egmSchedule(input, ep = DEFAULT_EP) {
     const opts = cleanEp(ep) ?? cleanEp({});
     const P = resolveParams(input.params);
-    const tiers = normalizeTiers([...((input.tiers && input.tiers.length) ? input.tiers : DEFAULT_TIERS), 'His']);
+    const branchCath = opts.catheters.some(c => BRANCH_CATHETERS.includes(c));
+    const tiers = normalizeTiers([...((input.tiers && input.tiers.length) ? input.tiers : DEFAULT_TIERS), 'His', ...(branchCath ? ['RBB'] : [])]);
     const beats = input.beats || [];
     const L = buildLadder({ beats, atrial: input.atrial || [], mechanism: input.mechanism, params: input.params, tiers, durationMs: input.durationMs });
     const apSite = opts.apSite === 'auto' ? (L.mechanism === 'pjrt' ? 'septal' : 'leftLateral') : opts.apSite;
-    const activations = ladderActivations(L, { apSite, vOrigin: opts.vOrigin, atSite: opts.atSite, beats });
+    const activations = ladderActivations(L, { apSite, vOrigin: opts.vOrigin, atSite: opts.atSite, beats, branches: branchCath });
     const deflections = activations.flatMap(a => activationDeflections(a, P)).sort((a, b) => a.tMs - b.tMs);
 
     const letters = deflections.filter(d => d.ch === 'His' && (d.kind === 'A' || d.kind === 'H' || d.kind === 'V'))
@@ -371,8 +396,11 @@ export function egmSchedule(input, ep = DEFAULT_EP) {
     const out = [];
     for (const v of activations.filter(a => a.kind === 'V')) {
         const b = { beatId: v.beatId, tV: v.tMs, tH: null, tHisA: null, AH: null, HV: null, VA: null, VH: null, origin: v.origin };
-        const ante = L.paths.find(p => p.role === 'his' && p.beatId === v.beatId && p.from.tMs <= v.tMs);
-        if (ante) { b.tH = ante.from.tMs; b.HV = r1(v.tMs - b.tH); }
+        // pre-excitation: the nodal His of a beat can fall after its delta wave (HV negative)
+        const ante = L.paths.find(p => p.role === 'his' && p.beatId === v.beatId && p.from.tMs <= v.tMs + 120);
+        // bundle-branch re-entry: the His is the bystander fired at each turn of the circuit, one HV before the QRS
+        const turn = !ante && L.mechanism === 'bbrt' ? L.paths.find(p => p.role === 'his-retro' && p.beatId === v.beatId) : null;
+        if (ante || turn) { b.tH = (ante || turn).from.tMs; b.HV = r1(v.tMs - b.tH); }
         const av = L.paths.find(p => p.role === 'av' && p.beatId === v.beatId);
         const feeding = av && atrialActs.find(a => near(a.tMs, av.from.tMs, 2));
         if (feeding && b.tH != null) {

@@ -197,7 +197,7 @@ section('samples, channels and settings');
     ok('settings: unknown catheters dropped, their own order kept', JSON.stringify(junk.catheters) === JSON.stringify(['HRA', 'CS12']));
     ok('settings: a bad order, speed or site falls back', JSON.stringify(junk.order) === JSON.stringify(BLOCK_ORDERS[0]) && junk.speedMmS === 100 && junk.apSite === 'auto' && junk.hisSplit === false && junk.showLetters === false);
     ok('settings: nothing is not a setting', cleanEp(null) === null && cleanEp('x') === null);
-    ok('settings: every catheter by default', JSON.stringify(cleanEp({}).catheters) === JSON.stringify(CATHETER_IDS));
+    ok('settings: every catheter but the bundle-branch ones by default', JSON.stringify(cleanEp({}).catheters) === JSON.stringify(CATHETER_IDS.filter(id => id !== 'RB' && id !== 'LB')));
 
     const rec = makeExample('normalSinus');
     const { beats, atrial } = figureMarkers(rec);
@@ -241,6 +241,30 @@ section('a posteroseptal pathway is near-concentric; typical flutter climbs the 
     const fl = reading('flutter21', 'flutter', { fWaveMs: 210, fPhaseMs: 100 }).s;
     const f = atrialOf(fl, acts(fl, 'A')[5]);
     ok('flutter: the ostium, then the His region 30 ms up the septum, the HRA last at 100 ms', f.His === f.CS910 + 30 && f.HRA === f.CS910 + 100 && f.CS12 === f.CS910 + 40);
+}
+
+section('bundle-branch catheters, bundle-branch re-entry, pre-excitation (core 1.29)');
+{
+    const bt = (i, q, w) => ({ id: 'b' + i, qrsOnMs: q, qrsOffMs: q + w, qrsWidthMs: w, quality: 'normal' });
+    const ep = { ...DEFAULT_EP, catheters: ['HRA', 'His', 'RB', 'LB', 'RVa'] };
+    ok('RB and LB are rows only when placed', channelsOf(ep).join(',') === 'HRA,His,RVa,RB,LB' && !channelsOf(DEFAULT_EP).includes('RB'));
+    // bundle-branch re-entry, CL 320, HV 80: H → RB → V → LB on every beat (Mazur 2005)
+    const beats = [0, 1, 2, 3, 4].map(i => bt(i, 400 + i * 320, 150));
+    const s = egmSchedule({ beats, atrial: [], mechanism: 'bbrt', params: { HV: 80 }, tiers: ['A', 'AV', 'His', 'V'], durationMs: 2000 }, ep);
+    const H = on(s, 'His', 'H'), RB = on(s, 'RB', 'RB'), LB = on(s, 'LB', 'LB'), Vq = beats.map(b => b.qrsOnMs);
+    ok('BBRT: a His before every QRS at the HV of the tachycardia', H.length === 5 && H.every((t, k) => Math.abs(Vq[k] - t - 80) < 1.5) && s.beats.every(b => b.HV === 80));
+    ok('BBRT: the RB potential between the His (≥ 20 ms after it) and the QRS', RB.length === 5 && RB.every((t, k) => t - H[k] >= 20 && t < Vq[k]));
+    ok('BBRT: the LB potential after the QRS (retrograde limb)', LB.length === 4 && LB.every((t, k) => t > Vq[k] && t < Vq[k + 1]));
+    ok('BBRT: LBBB-like ventricle — the RV apex before the left ventricle', s.activations.filter(a => a.kind === 'V').every(a => a.origin === 'LBBB'));
+    // the default catheters see the same schedule as before: no branch potentials
+    const s0 = egmSchedule({ beats, atrial: [], mechanism: 'bbrt', params: { HV: 80 }, tiers: ['A', 'AV', 'His', 'V'], durationMs: 2000 });
+    ok('without RB / LB catheters there are no branch potentials', !s0.deflections.some(d => d.kind === 'RB' || d.kind === 'LB'));
+    // sinus with pre-excitation: the His falls after the delta wave (H-delta negative)
+    const atrial = [0, 1, 2].map(i => ({ id: 'a' + i, tMs: 300 + i * 800 }));
+    const pb = atrial.map((a, i) => bt(i, a.tMs + 100, 140));
+    const w = egmSchedule({ beats: pb, atrial, mechanism: 'wpw', params: {}, tiers: ['A', 'AV', 'His', 'V'], durationMs: 2600 });
+    ok('WPW: HV negative on the His catheter (the His after the delta wave)', w.beats.length === 3 && w.beats.every(b => b.HV === -15));
+    ok('WPW: the ventricle pre-excited from the pathway\'s insertion', w.activations.filter(a => a.kind === 'V').every(a => a.origin === 'preLeftLateral'));
 }
 
 console.log(`\n${pass} ok, ${fail} fail`);

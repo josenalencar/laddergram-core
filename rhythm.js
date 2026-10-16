@@ -23,6 +23,9 @@ import { DEFAULT_PARAMS, MECHANISMS, PR_FLOOR_MS, PLAUSIBILITY_VERSION, pairAtri
  *   P3  1.28  the RP rule reads a SURFACE RP (audit of 16/10/2026, see the cut-offs below): orthodromic AVRT is
  *             excluded only under 50 ms (the shortest VA recorded in AVRT), a caution from 50 to 90 ms; typical
  *             AVNRT is favoured up to 90 ms (was: AVRT excluded at ≤ 70 and favoured above 70).
+ *   P4  1.29  four readings a reader names (never suggested, never called by the rhythm detector): sinus rhythm with
+ *             pre-excitation (wpw), pre-excited AF (afibPre), atriofascicular tachycardia, bundle-branch re-entry
+ *             (bbrt), with their own rules; the verdicts of every other reading are P3's.
  */
 export { PLAUSIBILITY_VERSION };   // defined beside ENGINE_VERSION (engine.js), so every ladder is stamped with both
 
@@ -56,6 +59,7 @@ function cv(a) {
 }
 const sd = (a) => (a.length < 2 ? 0 : cv(a) * (a.reduce((s, x) => s + x, 0) / a.length));
 const width = (b) => b.qrsWidthMs ?? ((b.qrsOffMs ?? b.qrsOnMs + 90) - b.qrsOnMs);
+const B_any_wide = (beats) => beats.some(b => b && (b.preExcited === true || width(b) >= WIDE_QRS_MS));
 const ectopic = (b) => b.quality === 'pvc';
 
 /**
@@ -179,8 +183,8 @@ export function measureRhythm(beats = [], atrial = [], params = null) {
 
 // ─── plausibility ───────────────────────────────────────────────────────────
 
-const AVRT_FAMILY = ['avrt', 'pjrt', 'avrtAnti'];
-const SVT_REGULAR = ['avnrt', 'avrt', 'pjrt', 'at', 'jt', 'avrtAnti'];
+const AVRT_FAMILY = ['avrt', 'pjrt', 'avrtAnti', 'atriofascicular'];
+const SVT_REGULAR = ['avnrt', 'avrt', 'pjrt', 'at', 'jt', 'avrtAnti', 'atriofascicular'];
 
 /**
  * Every mechanism → { status: 'ok' | 'caution' | 'excluded', reasons: [] }, plus the rhythm and a one-line summary.
@@ -204,14 +208,21 @@ export function plausibility(beats = [], atrial = [], params = null, evidence = 
     // QRS width
     if (!m.wide) {
         exclude(['avrtAnti'], `narrow QRS (${m.qrsMs} ms): antidromic AVRT is maximally pre-excited, so its QRS is wide`);
+        exclude(['atriofascicular'], `narrow QRS (${m.qrsMs} ms): an atriofascicular tachycardia is pre-excited, LBBB-like`);
+        caution(['bbrt'], `narrow QRS (${m.qrsMs} ms): bundle-branch re-entry conducts down one branch, so its QRS is a bundle-branch block`);
+        caution(['wpw'], `narrow QRS (${m.qrsMs} ms): manifest pre-excitation widens the QRS with a delta wave (or mark the QRS width)`);
+        if (!B_any_wide(beats)) caution(['afibPre'], 'no wide QRS: pre-excited atrial fibrillation conducts its widest beats over the pathway');
         caution(['vt'], `narrow QRS (${m.qrsMs} ms): VT is wide; even fascicular VT, the narrowest, is usually 100–140 ms`);
     }
     if (!m.anyEctopic && !m.wide) caution(['pvc'], 'no beat is marked ectopic (select a QRS and tick "Ectopic")');
 
     // rate and regularity
-    if (!m.tachy && m.RR) caution(['avnrt', 'avrt', 'pjrt', 'avrtAnti', 'at', 'vt'], `rate ${m.rate}/min: not a tachycardia`);
-    if (m.regularity === 'irregular') caution(['avnrt', 'avrt', 'pjrt', 'jt', 'avrtAnti'], `irregular RR (CV ${Math.round(m.rrCV * 100)} %): re-entry through the AV node or a pathway is regular`);
-    if (m.regularity === 'regular' && m.nBeats >= 5) caution(['afib'], 'regular RR: fibrillation conducts irregularly (a regular RR in AF means complete AV block)');
+    if (!m.tachy && m.RR) caution(['avnrt', 'avrt', 'pjrt', 'avrtAnti', 'atriofascicular', 'at', 'vt', 'bbrt'], `rate ${m.rate}/min: not a tachycardia`);
+    if (m.regularity === 'irregular') caution(['avnrt', 'avrt', 'pjrt', 'jt', 'avrtAnti', 'atriofascicular'], `irregular RR (CV ${Math.round(m.rrCV * 100)} %): re-entry through the AV node or a pathway is regular`);
+    if (m.regularity === 'irregular') caution(['bbrt'], `irregular RR (CV ${Math.round(m.rrCV * 100)} %): re-entry through the bundle branches is regular`);
+    if (m.regularity === 'regular' && m.nBeats >= 5) caution(['afib', 'afibPre'], 'regular RR: fibrillation conducts irregularly (a regular RR in AF means complete AV block)');
+    if (m.tachy && m.RR) caution(['wpw'], `rate ${m.rate}/min: a sinus rhythm with pre-excitation — a tachycardia over the pathway is antidromic AVRT or pre-excited AF`);
+    if (m.relation === 'none') caution(['wpw'], 'no P marked: the P-to-delta interval is what the pre-excited reading draws');
 
     // the A:V relation
     if (m.relation === 'none') {
@@ -236,10 +247,12 @@ export function plausibility(beats = [], atrial = [], params = null, evidence = 
         caution(['hisExtra'], 'no P fails to conduct');
         // a P before every QRS is not fibrillation; a fast sinus rhythm conducts with a short PR (the AV node is
         // under the same sympathetic drive), so a long PR at a tachycardia rate is a P that belongs to the previous QRS
-        exclude(['afib'], `a P before each QRS (1:1): atrial fibrillation has no discrete P waves`);
+        exclude(['afib', 'afibPre'], `a P before each QRS (1:1): atrial fibrillation has no discrete P waves`);
+        if (m.PR != null && m.PR >= 160) caution(['wpw'], `PR ${m.PR} ms: manifest pre-excitation shortens the P-to-delta interval (usually < 120 ms)`);
         if (m.tachy && m.PR != null && m.PR >= 250) caution(['avnodal'], `${rp} at ${m.rate}/min: a sinus tachycardia this fast conducts with a short PR — a P this far from the next QRS is more likely a retrograde P or an ectopic atrial rhythm (P-wave axis is not evaluated)`);
     } else if (m.relation === 'A>V') {
         exclude(AVRT_FAMILY, `more P than QRS (${m.pPerCycle} per cycle): AVRT needs 1:1 — the atrium and the ventricle are both in the circuit`);
+        caution(['wpw'], 'more P than QRS: a blocked P conducts over neither the node nor the pathway');
         caution(['avnrt'], `more P than QRS: AVNRT with block below the circuit is rare`);
         caution(['jt'], 'more P than QRS');
     } else if (m.relation === 'V>A' || m.relation === 'dissociated') {
@@ -262,6 +275,8 @@ export function plausibility(beats = [], atrial = [], params = null, evidence = 
     }
     // a focal atrial tachycardia is under 240 /min; faster regular atrial activity is flutter
     if (m.relation !== 'none' && m.nP >= 3 && m.PP && m.PP < 250 && m.ppCV != null && m.ppCV <= 0.1) caution(['at'], `atrial rate ${Math.round(60000 / m.PP)}/min: a focal atrial tachycardia is under 240 /min — regular atrial activity this fast is flutter`);
+    // pre-excited AF is AF: whatever rules AF out by the P waves rules it out too
+    if (v.afib.status === 'excluded' && v.afibPre.status !== 'excluded') exclude(['afibPre'], v.afib.reasons.find(r => /P/.test(r)) || 'organised atrial activity: not fibrillation');
     if (evidence) evidenceReasons(evidence, v, caution);
 
     return { rhythm: m, verdicts: v, summary: rhythmSummary(m) };
@@ -365,6 +380,10 @@ export const READINGS = Object.freeze([
     RD('vt', 'vt', 'Ventricular tachycardia', 'Wide-QRS tachycardia'),
     RD('nsvt', 'pvc', 'Non-sustained ventricular tachycardia', 'Wide-QRS tachycardia'),
     RD('avrtAnti', 'avrtAnti', 'Antidromic AVRT', 'Wide-QRS tachycardia'),
+    RD('atriofascicular', 'atriofascicular', 'Atriofascicular (Mahaim) tachycardia', 'Wide-QRS tachycardia', { tiers: ['His', 'RBB'] }),
+    RD('bbrt', 'bbrt', 'Bundle-branch re-entry VT', 'Wide-QRS tachycardia', { tiers: ['His', 'RBB'] }),
+    RD('wpw', 'wpw', 'Sinus rhythm with ventricular pre-excitation (WPW pattern)', 'Sinus & AV conduction', { tiers: ['His'] }),
+    RD('afibPre', 'afibPre', 'Pre-excited atrial fibrillation', 'Atrial arrhythmias'),
     RD('afib', 'afib', 'Atrial fibrillation', 'Atrial arrhythmias'),
     RD('flutter', 'flutter', 'Atrial flutter', 'Atrial arrhythmias'),
     RD('ectopicAtrial', 'at', 'Ectopic atrial rhythm', 'Atrial arrhythmias'),
@@ -720,6 +739,15 @@ export function plausibleParams(mechanism, beats = [], atrial = []) {
             else set('blockBelowHis', 0, 'measured', `narrow escape (${w} ms): block in the AV node, junctional escape`);
             break;
         }
+        case 'atriofascicular':
+            if (oneToOne) set('VA', m.RP, 'measured', measuredVA);
+            else set('VA', cl ? Math.round(0.5 * cl) : 200, 'typical', 'atriofascicular tachycardia: the return up the right bundle, the His and the node');
+            if (oneToOne && cl && m.RP != null) set('apAnteMs', Math.max(30, Math.round(cl - m.RP)), 'measured', 'atrial end of the pathway → delta wave, from your marks (cycle − RP): a long, decremental descent');
+            else set('apAnteMs', 150, 'typical', 'a decremental atriofascicular pathway conducts slowly (a long P-to-delta)');
+            break;
+        case 'bbrt':
+            set('HV', 80, 'typical', 'bundle-branch re-entry: the HV of the tachycardia is at least that of sinus rhythm, which is usually prolonged (Caceres 1989; Mazur 2005)');
+            break;
         case 'flutter':
             if (m.PP) set('fWaveMs', null, m.nP >= 2 ? 'measured' : 'typical', m.nP >= 2 ? `fitted to your ${m.nP} F marks (P–P ${m.PP} ms)` : 'mark at least two F waves');
             break;

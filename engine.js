@@ -105,9 +105,9 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.28.0';   // = package.json version (test_versions.mjs)
+export const ENGINE_VERSION = '1.29.0';   // = package.json version (test_versions.mjs)
 /** The plausibility rules (rhythm.js) as their own versioned component — history in rhythm.js and the viewer's js/versions.js. */
-export const PLAUSIBILITY_VERSION = 'P3';
+export const PLAUSIBILITY_VERSION = 'P4';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
@@ -116,6 +116,12 @@ export const REFERENCES = {
     esc2019: 'Brugada J, Katritsis DG, Arbelo E, et al. 2019 ESC Guidelines for the management of patients with supraventricular tachycardia. Eur Heart J. 2020;41:655-720.',
     shi2025: 'Shi N, Liu I, Klein G, Antiperovitch P. Utility of the surface electrocardiogram RP interval cutoff for diagnosis of atrioventricular nodal reentrant tachycardia. J Electrocardiol. 2025;92:154094.',
     ceresnak2015: 'Ceresnak SR, Doan LN, Motonaga KS, et al. 50 is the new 70: short ventriculoatrial times are common in children with atrioventricular reciprocating tachycardia. Heart Rhythm. 2015;12:1541-7.',
+    klein1979: 'Klein GJ, Bashore TM, Sellers TD, et al. Ventricular fibrillation in the Wolff-Parkinson-White syndrome. N Engl J Med. 1979;301:1080-5.',
+    castellanos1975: 'Castellanos A, Agha AS, Befeler B, Myerburg RJ. Double accessory pathways in Wolff-Parkinson-White syndrome. Circulation. 1975;51:1020-5.',
+    tchou1988: 'Tchou P, Lehmann MH, Jazayeri M, Akhtar M. Atriofascicular connection or a nodoventricular Mahaim fiber? Circulation. 1988;77:837-48.',
+    ozcan2021: 'Ozcan EE, Turan OE, Akdemir B, et al. Comparison of electrophysiological characteristics of right- and left-sided Mahaim-type accessory pathways. J Cardiovasc Electrophysiol. 2021;32:360-9.',
+    caceres1989: 'Caceres J, Jazayeri M, McKinnie J, et al. Sustained bundle branch reentry as a mechanism of clinical tachycardia. Circulation. 1989;79:256-70.',
+    mazur2005: 'Mazur A, Kusniec J, Strasberg B. Bundle branch reentrant ventricular tachycardia. Indian Pacing Electrophysiol J. 2005;5:86-95.',
 };
 
 export const DEFAULT_PARAMS = Object.freeze({
@@ -146,6 +152,10 @@ export const DEFAULT_PARAMS = Object.freeze({
     PVARP: 250,        // pacing: post-ventricular atrial refractory period (the device ignores a P inside it)
     VRP: 250,          // pacing: ventricular refractory period (the device ignores a QRS inside it)
     saBlock: 0,        // sinoatrial exit block on the SN tier: 0 = none, 1 = type I (SA Wenckebach), 2 = type II
+    preAH: 80,         // pre-excitation: AH of the nodal route that runs beside the pathway (Josephson: AH 55–125 ms)
+    afVhMs: 16,        // atriofascicular (Mahaim) tachycardia: QRS onset → retrograde His, up the right bundle (Ozcan 2021: median 16 ms)
+    septMs: 30,        // bundle-branch re-entry: QRS onset → the retrograde bundle branch, across the septum
+    bbrtType: 0,       // bundle-branch re-entry: 0 = down the RBB, up the LBB (LBBB-like QRS, the usual form); 1 = the reverse (RBBB-like)
 });
 
 /** Labels/units for the params panel. `adv` = hidden under "advanced". */
@@ -176,6 +186,10 @@ export const PARAM_INFO = {
     AVI: { kind: 'clinical', label: 'AV delay (empty = from your marks)', unit: 'ms', what: 'P (sensed or paced) → paced QRS in a dual-chamber device' },
     PVARP: { kind: 'assumed', label: 'PVARP', unit: 'ms', normal: [200, 350], what: 'after each ventricular event the device ignores atrial activity this long (it is not tracked)' },
     VRP: { kind: 'assumed', label: 'VRP', unit: 'ms', normal: [200, 300], what: 'after each ventricular event the device ignores ventricular activity this long' },
+    preAH: { kind: 'assumed', label: 'AH of the nodal route (pre-excitation)', unit: 'ms', normal: [55, 125], normalOf: 'AH', ref: 'josephson', what: 'P onset + PA + this AH = the His: the nodal wave that fuses with the pre-excited one (the pathway reaches the ventricle first, so the His falls at or after the delta wave)' },
+    afVhMs: { kind: 'assumed', needsTier: ['His'], label: 'QRS onset → retrograde His (atriofascicular)', unit: 'ms', ref: 'ozcan2021', what: 'the pathway inserts in the right bundle, so the His is reached up the right bundle shortly after the QRS onset' },
+    septMs: { kind: 'assumed', label: 'Transseptal conduction (bundle-branch re-entry)', unit: 'ms', adv: true, what: 'QRS onset → the bundle branch that conducts retrogradely, across the septum' },
+    bbrtType: { kind: 'assumed', needsTier: ['RBB'], label: 'Bundle-branch re-entry: 0 = down RBB (LBBB-like), 1 = down LBB (RBBB-like)', unit: '', what: 'which branch is the antegrade limb' },
     saBlock: { kind: 'assumed', needsTier: ['SN'], label: 'SA exit block (0 none, 1 type I, 2 type II)', unit: '', what: 'a sinus pause read as a sinus discharge that did not leave the node: type II keeps the sinus cycle (the pause is a multiple of it), type I lengthens the SA conduction before the drop (SA Wenckebach)' },
 };
 
@@ -194,6 +208,10 @@ export const MECHANISMS = [
     { id: 'vt', label: 'Ventricular tachycardia (AV dissociation, capture beats)', params: [...ALWAYS, 'ectopicVA', 'vExit'] },
     { id: 'afib', label: 'Atrial fibrillation', params: [...ALWAYS, 'fibMeanMs'] },
     { id: 'flutter', label: 'Atrial flutter', params: [...ALWAYS, 'fWaveMs', 'fPhaseMs'] },
+    { id: 'wpw', label: 'Sinus rhythm with ventricular pre-excitation (fusion: accessory pathway + AV node)', params: [...ALWAYS, 'preAH'] },
+    { id: 'afibPre', label: 'Pre-excited atrial fibrillation (wide QRS over the pathway, narrow over the node)', params: [...ALWAYS, 'fibMeanMs', 'apAnteMs'] },
+    { id: 'atriofascicular', label: 'Atriofascicular (Mahaim) tachycardia — antidromic over a decremental pathway into the right bundle', params: [...ALWAYS, 'VA', 'apAnteMs', 'afVhMs'] },
+    { id: 'bbrt', label: 'Bundle-branch re-entry VT (down one branch, up the other)', params: [...ALWAYS, 'septMs', 'bbrtType'] },
     { id: 'paced', label: 'Paced rhythm (VVI, AAI, DDD — from the marks you flag as paced)', params: [...ALWAYS, 'LRI', 'AVI', 'PVARP', 'VRP'], needs: 'pacedMarks' },
 ];
 
@@ -510,7 +528,7 @@ function branches(B, b, J, src) {
 }
 
 /** His (if drawn), branches (if drawn), and the vertical V line. `from` = band the wave leaves the AV level by. */
-function hisAndV(B, b, { from } = {}) {
+function hisAndV(B, b, { from, noV = false } = {}) {
     const { T } = B;
     from = from || T.av;
     const J = junctionTimes(B, b.qrsOnMs, b.params);
@@ -524,7 +542,7 @@ function hisAndV(B, b, { from } = {}) {
     const src = T.hasHis ? 'His' : from;
     if (T.hasBB) branches(B, b, J, src);
     else B.link(b.qrsOnMs, src, 1, 'V', 0, { beatId: b.id });
-    vTier(B, b);
+    if (!noV) vTier(B, b);
 }
 
 /**
@@ -1132,8 +1150,11 @@ function buildAvrt(B, input, { pjrt = false } = {}) {
 }
 
 /** Atrial fibrillation: schematic f waves; one conducts per QRS, the rest are concealed. */
-function buildAfib(B, input) {
+function buildAfib(B, input, { preExcited = false } = {}) {
     const { P } = B;
+    // pre-excited AF: a wide QRS is a ventricle reached over the pathway (fast, not decremental — the f wave
+    // that reaches it is the latest one apAnteMs before the delta wave), a narrow one over the node
+    const overAp = (b) => preExcited && b.quality !== 'pvc' && (b.preExcited ?? isWide(b, P));
     const beats = input.beats.slice().sort(byQ);
     if (!beats.length) return;
     const rnd = lcg(1234);
@@ -1145,9 +1166,9 @@ function buildAfib(B, input) {
     const used = new Map();              // f index → beat
     let last = -1;
     for (const b of beats) {
-        if (isEctopicLike(b, P)) continue;
+        if (!overAp(b) && isEctopicLike(b, P)) continue;
         const J = junctionTimes(B, b.qrsOnMs, b.params);
-        const latest = J.tAvOut - P.AHmin - P.PA;
+        const latest = overAp(b) ? b.qrsOnMs - P.apAnteMs : J.tAvOut - P.AHmin - P.PA;
         let k = -1;
         for (let i = f.length - 1; i > last; i--) if (f[i] <= latest) { k = i; break; }
         if (k < 0) continue;
@@ -1157,7 +1178,10 @@ function buildAfib(B, input) {
     f.forEach((t, i) => {
         B.ev('A', t, 0, { style: 'none', role: 'f' });
         B.seg(['A', t, 0], ['A', t, 1], { role: 'atrium' });
-        if (used.has(i)) {
+        if (used.has(i) && overAp(used.get(i))) {
+            const b = used.get(i);
+            B.seg(['A', t, 1], ['V', b.qrsOnMs, 0], { label: 'AP', color: AP_COLOR, beatId: b.id, role: 'ap-ante' });
+        } else if (used.has(i)) {
             const b = used.get(i);
             avConduct(B, t, junctionTimes(B, b.qrsOnMs, b.params).tAvOut, { beatId: b.id });
         } else {
@@ -1166,12 +1190,22 @@ function buildAfib(B, input) {
         }
     });
     for (const b of beats) {
-        if (conducted.has(b.id)) hisAndV(B, b);
+        if (conducted.has(b.id) && overAp(b)) vTier(B, b);
+        else if (conducted.has(b.id)) hisAndV(B, b);
         else if (isEctopicLike(b, P)) ventricularFocus(B, b, null);
         else junctionalFocus(B, b, null);
     }
     B.L.intervals = measureIntervals(beats, [], new Map(), P);
     const { med } = rrStats(beats);
+    if (preExcited) {
+        const pre = beats.filter(b => conducted.has(b.id) && overAp(b));
+        const rrPre = [];
+        for (let i = 1; i < beats.length; i++) if (pre.includes(beats[i]) && pre.includes(beats[i - 1])) rrPre.push(beats[i].qrsOnMs - beats[i - 1].qrsOnMs);
+        const sh = rrPre.length ? Math.min(...rrPre) : null;
+        B.note(`Pre-excited atrial fibrillation: ${pre.length} of ${beats.length} QRS conducted over the accessory pathway (wide), the rest over the AV node (narrow); a QRS between the two is a fusion.`);
+        if (sh != null) B.note(`Shortest RR between pre-excited beats ${sh} ms${sh <= 250 ? ' (≤ 250 ms: a pathway that can conduct atrial fibrillation this fast is the one at risk of ventricular fibrillation — shortest pre-excited RR 180 vs 240 ms in Klein 1979)' : ''}.`, sh <= 250 ? 'warning' : 'info', 'sperri');
+        if (!pre.length) B.note('No QRS is wide (or marked pre-excited): every beat is drawn over the AV node.', 'caution', 'no-pre-excited-beat');
+    }
     B.note(`Atrial fibrillation: f waves are SCHEMATIC (fixed seed, mean f–f ${P.fibMeanMs} ms) — only the pattern "one conducts, the rest are concealed in the AV node" is meaningful. Ventricular response ${med ? Math.round(60000 / med) : '—'} /min (median RR).`);
 }
 
@@ -1307,6 +1341,160 @@ function buildAvrtAnti(B, input) {
     B.note(`Antidromic AVRT: anterograde over the accessory pathway (maximally pre-excited, wide QRS), retrograde over the His-Purkinje system and AV node (VA ${P.VA} ms). The same circuit as orthodromic AVRT, run the other way.`);
     const { med: rrA } = rrStats(beats);
     if (rrA && rrA - P.VA > 150) B.note(`P-to-delta ${Math.round(rrA - P.VA)} ms: long for a Kent pathway (60–110 ms); an atriofascicular (decremental) pathway fits better.`, 'caution', 'p-delta-long');
+}
+
+/**
+ * Sinus rhythm with manifest pre-excitation (the WPW pattern). Each P reaches the ventricle twice: over the
+ * accessory pathway (straight, orange, from the P onset to the delta wave: the P-to-delta interval is the
+ * measured PR) and over the AV node and His (P + PA + preAH = His; His + HV = where the nodal wave would have
+ * started the ventricle). The pathway gets there first, so the QRS starts with the delta wave and the His
+ * falls at or after it (a short or negative H-delta); the nodal wave fuses with the pre-excited one, and the
+ * later it arrives the more of the ventricle the pathway has activated. Faster atrial rates delay the node and
+ * the His falls further after the delta wave (Castellanos 1975). A beat marked `preExcited: false` conducted
+ * over the node alone (intermittent pre-excitation).
+ */
+function buildWpw(B, input) {
+    const { P, T } = B;
+    const beats = input.beats.slice().sort(byQ), atrial = input.atrial.slice().sort(byT);
+    const { pairs } = pairAtrialToBeats(beats, atrial, P, { minLeadMs: PR_FLOOR_MS });
+    const aById = new Map(atrial.map(a => [a.id, a]));
+    const conductedP = new Set(pairs.values());
+    for (const a of atrial) {
+        sinusEntry(B, a);
+        if (!conductedP.has(a.id)) avBlock(B, a.tMs, null, { atrialId: a.id });
+    }
+    const hd = [];
+    for (const b of beats) {
+        const a = aById.get(pairs.get(b.id));
+        if (!a) { if (isEctopicLike(b, P)) ventricularFocus(B, b, null); else junctionalFocus(B, b, null); continue; }
+        const q = b.qrsOnMs, Pb = beatParams(B, b);
+        const tHis = a.tMs + Pb.PA + Pb.preAH;            // where the nodal wave reaches the His
+        const tVn = tHis + Pb.HV;                         // and where it would have started the ventricle
+        if (b.preExcited === false || tVn <= q) {
+            // the node got there first (or the reader says this beat was not pre-excited): an ordinary beat,
+            // and the pathway's wave meets a ventricle already activated
+            avConduct(B, a.tMs, junctionTimes(B, q, b.params).tAvOut, { beatId: b.id });
+            hisAndV(B, b);
+            continue;
+        }
+        B.seg(['A', a.tMs, 1], ['V', q, 0], { label: 'AP', color: AP_COLOR, beatId: b.id, role: 'ap-ante' });
+        vTier(B, b);
+        const shadow = { ...b, qrsOnMs: tVn };
+        avConduct(B, a.tMs, junctionTimes(B, tVn, b.params).tAvOut, { beatId: b.id });
+        hisAndV(B, shadow, { noV: true });
+        B.ev('V', tVn, 0, { role: 'fusion', beatId: b.id, style: 'none' });
+        hd.push({ hd: Math.round(q - tHis), pre: Math.round(tVn - q), pr: Math.round(q - a.tMs) });
+    }
+    B.L.intervals = measureIntervals(beats, atrial, pairs, P);
+    if (hd.length) {
+        const med = (k) => median(hd.map(x => x[k]));
+        B.note(`Pre-excitation: P-to-delta (PR) ${med('pr')} ms over the accessory pathway; the nodal wave reaches the His ${-med('hd')} ms after the delta wave (H-delta ${med('hd')} ms, assumed AH ${P.preAH}) and the ventricle about ${med('pre')} ms after it — the QRS is a fusion of the two.`);
+    }
+    const prs = hd.map(x => x.pr);
+    if (prs.length && Math.min(...prs) >= 120) B.note(`PR ${Math.min(...prs)} ms: manifest pre-excitation usually shortens the PR below 120 ms.`, 'caution', 'wpw-pr-long');
+    if (!hd.length && beats.length) B.note('No beat is pre-excited with these timings: the node reaches the ventricle before the pathway (lower the AH, or the beats are not pre-excited).', 'caution', 'wpw-none');
+}
+
+/**
+ * Atriofascicular ("Mahaim") tachycardia: antidromic, down a slowly conducting, decremental pathway from the
+ * lateral tricuspid annulus that inserts in the distal right bundle (Tchou 1988), so the QRS is LBBB-like, and
+ * back up the right bundle to the His — reached shortly after the QRS onset (Ozcan 2021: QRS → His median
+ * 16 ms) — and the AV node to the atrium. The pathway is drawn wavy (decremental) and ends in the RBB tier
+ * when the bundle branches are shown.
+ */
+function buildAtriofascicular(B, input) {
+    const { P, T } = B;
+    const beats = input.beats.slice().sort(byQ);
+    if (!beats.length) return;
+    const tA = beats.map(b => b.qrsOnMs + P.VA);
+    beats.forEach((b, i) => {
+        const q = b.qrsOnMs;
+        let tAP;
+        if (i > 0) tAP = tA[i - 1];
+        else { const e = initiatingEntry(B, b, input.atrial); tAP = e ?? q - P.apAnteMs; }
+        const tH = q + P.afVhMs;
+        let tAV = tH;
+        if (T.hasBB) {
+            // the pathway ends in the right bundle: the distal RB fires just before the QRS, the wave goes on
+            // down to the ventricle (RBB → V) and back up the RBB to the His
+            const tIns = q - 10;
+            B.seg(['A', tAP, 1], ['RBB', tIns, 1], { label: 'AP', color: AP_COLOR, style: 'wavy', beatId: b.id, role: 'ap-ante' });
+            B.link(q, 'RBB', 1, 'V', 0, { beatId: b.id });
+            vTier(B, b);
+            B.seg(['RBB', tIns, 1], ['RBB', tH, 0], { arrow: 'end', beatId: b.id, role: 'bb-retro' });
+        } else {
+            B.seg(['A', tAP, 1], ['V', q, 0], { label: 'AP', color: AP_COLOR, style: 'wavy', beatId: b.id, role: 'ap-ante' });
+            vTier(B, b);
+            if (T.hasHis) {
+                B.seg(['V', q, 0.5], ['V', tH, 0], { arrow: 'end', beatId: b.id, role: 'v-to-his', label: 'right bundle', labelAnchor: 'start-below-right' });
+                B.link(tH, 'V', 0, 'His', 1, { beatId: b.id });
+            } else B.link(tH, 'V', 0, T.avLow, 1, { beatId: b.id });
+        }
+        if (T.hasHis) {
+            tAV = tH + 15;
+            B.seg(['His', tH, 1], ['His', tAV, 0], { arrow: 'end', beatId: b.id, role: 'his-retro' });
+        }
+        if (tA[i] <= tAV + 10) B.note(`VA ${P.VA} ms leaves no time for retrograde conduction through the His and the node.`, 'warning', 'va-no-retro-time');
+        avRetro(B, tAV, Math.max(tA[i], tAV + 10), { beatId: b.id });
+        atrialRetro(B, tA[i], { beatId: b.id });
+    });
+    B.L.intervals = measureIntervals(beats, [], new Map(), P).map(iv => ({ ...iv, VAms: P.VA }));
+    const { med: rr } = rrStats(beats);
+    B.note(`Atriofascicular (Mahaim) tachycardia: antidromic down a decremental pathway into the right bundle (LBBB-like QRS), back up the right bundle to the His ${P.afVhMs} ms after the QRS onset, then the AV node (VA ${P.VA} ms).${rr ? ` P-to-delta ${Math.round(rr - P.VA)} ms.` : ''}`);
+    if (!T.hasBB) B.note('Show the RBB / LBB tiers to see the pathway end in the right bundle.', 'info', 'show-branches');
+}
+
+/**
+ * Bundle-branch re-entry VT (Caceres 1989; Mazur 2005): the circuit is the His–Purkinje system and the
+ * septum — down the right bundle, across the septum, up the left bundle to the bifurcation of the His and
+ * down the right bundle again (the usual form, LBBB-like QRS; bbrtType 1 runs it the other way, RBBB-like).
+ * Every QRS has a His before it, at an HV at least that of sinus rhythm (the HV parameter here is the one of
+ * the tachycardia), with the sequence H → RB → V → LB; a change in H–H precedes the change in V–V; the atria
+ * are usually dissociated (the P waves marked are drawn blocked in the node).
+ */
+function buildBbrt(B, input) {
+    const { P, T } = B;
+    const beats = input.beats.slice().sort(byQ);
+    if (!beats.length) return;
+    const ante = P.bbrtType === 1 ? 'LBB' : 'RBB', retro = P.bbrtType === 1 ? 'RBB' : 'LBB';
+    for (const a of (input.atrial || []).slice().sort(byT)) { sinusEntry(B, a); avBlock(B, a.tMs, null, { atrialId: a.id }); }
+    const tB = beats.map(b => b.qrsOnMs - P.HV);        // the turnaround: the bifurcation, one HV before each QRS
+    if (!T.hasBB) {
+        // without the branches drawn, the loop is His → V → His
+        beats.forEach((b, i) => {
+            hisAndV(B, b);
+            if (i + 1 < beats.length && T.hasHis) {
+                B.seg(['V', b.qrsOnMs, 0.5], ['V', b.qrsOnMs + P.septMs, 0], { arrow: 'end', beatId: b.id, role: 'transseptal', label: 'septum' });
+                B.link(b.qrsOnMs + P.septMs, 'V', 0, 'His', 1, { beatId: b.id });
+            }
+        });
+        B.note('Bundle-branch re-entry: show the RBB / LBB tiers to see the circuit (down one bundle, up the other).', 'caution', 'bbrt-needs-branches');
+    } else {
+        beats.forEach((b, i) => {
+            const q = b.qrsOnMs, o = { beatId: b.id };
+            if (T.hasHis) {
+                // the His above the bifurcation is a bystander, activated from below at each turn
+                B.seg(['His', tB[i], 1], ['His', tB[i] + 10, 0], { arrow: 'end', ...o, role: 'his-retro' });
+            }
+            // down the antegrade branch
+            if (ante === 'LBB') B.link(tB[i], 'RBB', 0, 'LBB', 0, o);
+            B.seg([ante, tB[i], 0], [ante, q, 1], { ...o, role: 'bb' });
+            B.link(q, ante, 1, 'V', 0, o);
+            vTier(B, b);
+            // across the septum, up the other branch to the bifurcation of the next beat
+            if (i + 1 < beats.length) {
+                const tUp = q + P.septMs;
+                B.seg(['V', q, 0.5], ['V', tUp, 0], { arrow: 'end', ...o, role: 'transseptal', label: i === 0 ? 'septum' : null });
+                B.link(tUp, 'V', 0, retro, 1, o);
+                B.seg([retro, tUp, 1], [retro, tB[i + 1], 0], { arrow: 'end', ...o, role: 'bb-retro' });
+                if (retro === 'LBB') B.link(tB[i + 1], 'LBB', 0, 'RBB', 0, o);
+            }
+        });
+    }
+    B.L.bbrt = { antegrade: ante, retrograde: retro, morphology: ante === 'RBB' ? 'LBBB' : 'RBBB' };
+    B.L.intervals = measureIntervals(beats, [], new Map(), P);
+    B.note(`Bundle-branch re-entry: down the ${ante}, across the septum, up the ${retro} (${B.L.bbrt.morphology}-like QRS); a His before every QRS (HV ${P.HV} ms — at least the HV of sinus rhythm), H → ${ante === 'RBB' ? 'RB' : 'LB'} → V; changes in H–H precede those in V–V (Caceres 1989; Mazur 2005).`);
+    if (P.HV < 55) B.note(`HV ${P.HV} ms: in bundle-branch re-entry the HV of the tachycardia is at least the (usually prolonged) HV of sinus rhythm.`, 'caution', 'bbrt-hv-short');
 }
 
 /**
@@ -1546,6 +1734,10 @@ const RULES = {
     afib: buildAfib,
     flutter: buildFlutter,
     paced: buildPaced,
+    wpw: buildWpw,
+    afibPre: (B, input) => buildAfib(B, input, { preExcited: true }),
+    atriofascicular: buildAtriofascicular,
+    bbrt: buildBbrt,
 };
 
 /** Notes about per-beat bundle-branch conduction, for every mechanism. */
@@ -1561,8 +1753,10 @@ function conductionNotes(B, beats) {
         if (marked.length < supra.length) B.note(`Aberrant conduction on ${marked.length} of ${supra.length} supraventricular beat(s) (${kinds}).`);
         else B.note(`Bundle-branch conduction on every supraventricular beat: ${kinds}.`);
     }
-    if (T.hasBB) {
-        const wideUnmarked = supra.filter(b => isWide(b, P) && !b.conduction);
+    // a reading whose QRS is wide by its own mechanism (the pathway, the branch it goes down) explains the width
+    const explained = new Set(B.L.paths.filter(p => p.role === 'ap-ante').map(p => p.beatId));
+    if (T.hasBB && B.L.mechanism !== 'bbrt' && B.L.mechanism !== 'atriofascicular') {
+        const wideUnmarked = supra.filter(b => isWide(b, P) && !b.conduction && !explained.has(b.id));
         if (wideUnmarked.length) B.note(`${wideUnmarked.length} wide QRS without a marked bundle-branch block — select the QRS and set its conduction.`, 'caution', 'wide-unmarked');
     }
 }

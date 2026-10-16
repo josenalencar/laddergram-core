@@ -28,7 +28,7 @@ function truthMarks(id) {
 }
 
 section('the catalogue');
-ok(`PLAUSIBILITY_VERSION is P3 (${PLAUSIBILITY_VERSION})`, PLAUSIBILITY_VERSION === 'P3');
+ok(`PLAUSIBILITY_VERSION is P4 (${PLAUSIBILITY_VERSION})`, PLAUSIBILITY_VERSION === 'P4');
 ok('every reading draws with a mechanism the engine knows', READINGS.every(r => MECHANISMS.some(m => m.id === r.mechanism)));
 ok('every mechanism has its plain reading (id = mechanism id)', MECHANISMS.every(m => readingOf(m.id)?.mechanism === m.id));
 ok('every reading is in a family', READINGS.every(r => READING_FAMILIES.includes(r.family)));
@@ -89,7 +89,9 @@ section('without evidence the verdicts are P1\'s, exactly, except the RP rule P3
     const P1 = JSON.parse(readFileSync(join(here, 'fixtures', 'p1-verdicts.json'), 'utf8'));
     // P3 (16/10/2026) changed what the surface RP says about AVNRT and orthodromic AVRT, and nothing else
     const P3_KEYS = new Set(['avnrt', 'avrt']);
-    const pick = (v) => Object.fromEntries(Object.entries(v).filter(([k]) => !P3_KEYS.has(k)).map(([k, x]) => [k, [x.status, ...x.reasons]]));
+    // P4 (core 1.29) added readings; the lock covers the ones P1 knew
+    const P1_KEYS = new Set(Object.keys(Object.values(P1.truth)[0]));
+    const pick = (v) => Object.fromEntries(Object.entries(v).filter(([k]) => !P3_KEYS.has(k) && P1_KEYS.has(k)).map(([k, x]) => [k, [x.status, ...x.reasons]]));
     for (const which of ['truth', 'detected']) for (const id of Object.keys(P1[which])) P1[which][id] = Object.fromEntries(Object.entries(P1[which][id]).filter(([k]) => !P3_KEYS.has(k)));
     let same = 0, n = 0, diff = [];
     for (const sc of SYNTH_SCENARIOS) {

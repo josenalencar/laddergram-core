@@ -122,7 +122,13 @@ const AP_VENT = { leftLateral: 'preLeftLateral', septal: 'preSeptal', rightLater
  * heart's: the live pacer here is a single-chamber stimulator, so a paced reading is refused rather than run
  * as sinus rhythm.
  */
-export const LIVE_UNSUPPORTED = Object.freeze({ paced: 'device timing (tracking, PVARP, the lower rate) is not modelled in the live heart' });
+export const LIVE_UNSUPPORTED = Object.freeze({
+    paced: 'device timing (tracking, PVARP, the lower rate) is not modelled in the live heart',
+    wpw: 'antegrade conduction over an accessory pathway (pre-excitation, fusion) is not modelled in the live heart',
+    afibPre: 'antegrade conduction over an accessory pathway (pre-excitation) is not modelled in the live heart',
+    atriofascicular: 'a decremental atriofascicular pathway is not modelled in the live heart',
+    bbrt: 'the bundle branches as a circuit are not modelled in the live heart',
+});
 export const liveSupported = (mechanism) => !(mechanism in LIVE_UNSUPPORTED);
 
 export function fromReading(input, ep = DEFAULT_EP) {

@@ -93,6 +93,29 @@ submission): every one of them was an error the previous rule produced.
   children have VA < 70 ms, Ceresnak 2015; so do left-sided pathways in adults, Nagashima 2016). Up to 90 ms typical
   AVNRT is favoured and AVRT is a caution; above 90 ms AVRT is favoured. Every suggestion says the ECG misreads the
   SVT type in about one in five (Kalbfleisch 1993) and that the EP study decides. (P3, audit of 16/10/2026.)
+- Pre-excitation (`wpw`): each conducted P reaches the ventricle twice — over the accessory pathway (one straight
+  orange "AP" line from the P onset to the delta wave: the P-to-delta interval is the measured PR) and over the AV
+  node and His (P + PA + preAH = the His, + HV = where the nodal wave would have started the ventricle). The V line
+  stays vertical at the delta wave; the nodal line ends where it reaches the ventricle, after the delta wave: the
+  QRS is a fusion, and the His falls at or after the delta wave (H-delta short or negative; Castellanos 1975). A
+  beat the node reaches first, or marked `preExcited: false`, is an ordinary beat (intermittent pre-excitation).
+- Pre-excited AF (`afibPre`): the schematic f waves of AF; a wide QRS (or one marked `preExcited`) is conducted
+  over the pathway (the latest f wave apAnteMs before it, orange line A → V), a narrow one over the node. The
+  shortest RR between pre-excited beats is reported, a warning at ≤ 250 ms (Klein 1979: 180 vs 240 ms in the
+  patients with and without ventricular fibrillation).
+- Atriofascicular ("Mahaim") tachycardia (`atriofascicular`): antidromic, down a decremental pathway (wavy orange)
+  that inserts in the distal right bundle (Tchou 1988), LBBB-like; back up the right bundle to the His afVhMs
+  (16 ms, Ozcan 2021) after the QRS onset, then the node to the atrium. With the RBB / LBB tiers the pathway ends
+  in the RBB tier; without them it ends in V.
+- Bundle-branch re-entry (`bbrt`): the circuit is the bundle branches and the septum — down the RBB from the
+  bifurcation one HV before each QRS, across the septum (septMs), up the LBB to the next bifurcation (bbrtType 1:
+  the reverse, RBBB-like). The His above the bifurcation is a bystander fired at each turn, so a His precedes every
+  QRS at the HV of the tachycardia (at least that of sinus rhythm; typical 80 ms); P waves are dissociated (drawn
+  blocked in the node). Caceres 1989; Mazur 2005 (H → RB → V → LB; H–H changes precede V–V).
+- The EP view gains two catheters, RB and LB (bundle-branch potentials, sharp, on their own row; RB ≥ 20 ms after
+  the H). They are not in the default set, so every EP figure drawn before is unchanged; placing one adds the
+  RBB / LBB tiers to the schedule.
+- The rhythm detector never calls these four readings (a reader names them); `suggestReading` never suggests them.
 - Mobitz II: block drawn in the His. Wenckebach and 2:1: in the AV node. Wenckebach needs a monotonic AH rise
   of ≥30 ms and a post-block AH ≥20 ms shorter; a premature blocked P is a blocked PAC, checked first.
   Curvature (decrement) only inside a Wenckebach cycle.

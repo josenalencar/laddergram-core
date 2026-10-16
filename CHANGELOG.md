@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.29.0 — 2026-10-16 (plausibility P4)
+
+Four readings for the Tratado de ECG (Caps. 37 and 39), with the EP view's bundle-branch catheters:
+
+- **`wpw`** — sinus rhythm with ventricular pre-excitation: each P reaches the ventricle over the pathway (orange
+  AP, P onset → delta wave) and over the node and His (P + PA + `preAH` = His); the nodal wave arrives after the
+  delta wave (fusion; H-delta short or negative, Castellanos 1975). Intermittent: `preExcited: false` on a beat.
+- **`afibPre`** — pre-excited AF: wide QRS over the pathway, narrow over the node; the shortest pre-excited RR is
+  reported, a warning at ≤ 250 ms (Klein 1979).
+- **`atriofascicular`** — Mahaim tachycardia: antidromic down a decremental (wavy) pathway into the right bundle
+  (Tchou 1988), back up the RB to the His `afVhMs` 16 ms after the QRS (Ozcan 2021), the node, the atrium.
+- **`bbrt`** — bundle-branch re-entry: down the RBB, across the septum (`septMs`), up the LBB to the bifurcation
+  (`bbrtType` 1: the reverse); a His before every QRS at the HV of the tachycardia (typical 80 ms); P waves
+  dissociated (Caceres 1989; Mazur 2005).
+- **EP view**: catheters **RB** and **LB** (bundle-branch potentials, own rows), off by default — every EP figure
+  drawn before is unchanged; placing one adds the RBB / LBB tiers to the schedule. HV may be negative (pre-excitation).
+- `rhythm.js`: rules for the four readings (P4); `suggestReading` never suggests them; the viewer's rhythm detector
+  skips them; every other verdict is P3's. `READINGS`, `REFERENCES` (klein1979, castellanos1975, tchou1988,
+  ozcan2021, caceres1989, mazur2005), live heart: not supported for these four.
+
 ## 1.28.0 — 2026-10-16 (plausibility P3)
 
 **The RP rule reads a surface RP.** An audit of the literature for the Tratado de ECG (Cap. 31) found that the

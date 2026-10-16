@@ -132,7 +132,7 @@ export const EGM_GAIN_PX = 13;
 export const EGM_CHANNEL_LABELS = Object.freeze({
     HRA: 'HRA', His: 'His', Hisp: 'His p', Hisd: 'His d',
     CS910: 'CS 9-10', CS78: 'CS 7-8', CS56: 'CS 5-6', CS34: 'CS 3-4', CS12: 'CS 1-2',
-    RVa: 'RVa', Stim: 'Stim', II: 'II', V1: 'V1',
+    RVa: 'RVa', RB: 'RB', LB: 'LB', Stim: 'Stim', II: 'II', V1: 'V1',
 });
 const HIS_CHANNELS = ['His', 'Hisp', 'Hisd'];
 /** Room above a block that is not the tracing when it is the first thing on the page. */

@@ -91,6 +91,26 @@ console.log('\ntimings per mechanism');
     ok('VT with dissociation: no retrograde VA', plausibleParams('vt', d.beats, d.atrial).params.ectopicVA === null);
 }
 
+console.log('\nthe readings added in core 1.29 (pre-excitation, pre-excited AF, atriofascicular, bundle-branch re-entry)');
+{
+    const mk = (n, cl, w, rp = null) => {
+        const beats = Array.from({ length: n }, (_, i) => ({ id: 'b' + i, qrsOnMs: 400 + i * cl, qrsOffMs: 400 + i * cl + w, qrsWidthMs: w, quality: 'normal' }));
+        const atrial = rp == null ? [] : beats.map((b, i) => ({ id: 'a' + i, tMs: b.qrsOnMs + rp }));
+        return { beats, atrial, v: plausibility(beats, atrial).verdicts };
+    };
+    const narrowSvt = mk(10, 360, 90, 80), wideSvt = mk(10, 360, 150, 200), sinusPre = (() => {
+        const atrial = Array.from({ length: 8 }, (_, i) => ({ id: 'a' + i, tMs: 300 + i * 800 }));
+        const beats = atrial.map((a, i) => ({ id: 'b' + i, qrsOnMs: a.tMs + 100, qrsOffMs: a.tMs + 240, qrsWidthMs: 140, quality: 'normal' }));
+        return plausibility(beats, atrial).verdicts;
+    })();
+    ok('narrow SVT: the atriofascicular reading is excluded (it is pre-excited, LBBB-like)', narrowSvt.v.atriofascicular.status === 'excluded');
+    ok('wide 1:1 tachycardia: atriofascicular and bundle-branch re-entry stay open', wideSvt.v.atriofascicular.status !== 'excluded' && wideSvt.v.bbrt.status !== 'excluded');
+    ok('a P before each QRS: pre-excited AF excluded with AF', wideSvt.v.afibPre.status === 'excluded' && wideSvt.v.afib.status === 'excluded');
+    ok('sinus 75/min, PR 100, wide QRS: the pre-excited sinus reading is ok', sinusPre.wpw.status === 'ok');
+    ok('narrow SVT: the pre-excited sinus reading is a caution (narrow, tachycardia)', narrowSvt.v.wpw.status === 'caution');
+    ok('the suggestion never picks a reading added in 1.29 (they are named by a reader)', ['wpw', 'afibPre', 'atriofascicular', 'bbrt'].every(id => ![narrowSvt, wideSvt].some(x => suggestReading(x.beats, x.atrial).id === id)));
+}
+
 console.log('\ncontinue to the end, from the first three beats');
 for (const id of ['sinus', 'avb1', 'normalSinus', 'avnrt', 'avrt', 'svtShortRP', 'svtLongRP', 'twoToOne', 'chb', 'pvcBigeminy', 'flutter21']) {
     const { tr, beats, atrial } = truthMarks(id);
