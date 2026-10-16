@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.28.0 — 2026-10-16 (plausibility P3)
+
+**The RP rule reads a surface RP.** An audit of the literature for the Tratado de ECG (Cap. 31) found that the
+rule applied an intracardiac number to the surface ECG and used it to exclude: 70 ms is the VA to the earliest or
+septal atrial electrogram (Benditt 1979; Knight 2000; ESC 2019); the surface cut-off is 90 ms (ESC 2019, after
+Letsas 2010; Shi 2025, 200 EP-proven SVT: RP ≤ 90 ms in V1, sensitivity 97.2 %, specificity 96.6 % for typical
+AVNRT); and a VA under 70 ms is recorded in orthodromic AVRT (13 % of 495 children, the shortest 50 ms, Ceresnak
+2015; 8 of 46 adults with a left-sided pathway, Nagashima 2016).
+
+| surface RP (1:1, RP < PR) | 1.27 | 1.28 |
+|---|---|---|
+| < 50 ms | AVRT excluded; AVNRT suggested | unchanged |
+| 50–70 ms | AVRT excluded | AVRT a caution (unlikely, not excluded); AVNRT suggested |
+| 70–90 ms | AVNRT a caution; **AVRT suggested** | AVRT a caution; **AVNRT suggested** |
+| > 90 ms | AVNRT a caution; AVRT suggested | unchanged (cut-off 90, was 70) |
+
+Suggestions say "favoured", name the surface RP and that the EP study decides. The drawing's notes follow:
+an AVRT drawn with VA < 50 ms keeps the warning `va-too-short-for-ap`, 50–70 ms gets the caution
+`va-short-for-ap`; an AVNRT drawn with VA ≤ 90 ms is typical (the caution `va-ambiguous` starts above 90). No
+drawing changes; the golden fixture differs only in Figure 1A's claim (VA 80 AVNRT: typical, no longer a caution).
+`REFERENCES` gains esc2019, shi2025, ceresnak2015.
+
 ## 1.27.1 — 2026-10-04 (plausibility P2.1)
 
 `rankReadings` names a 1st-degree AV block at a measured PR > 200 ms (the definition: PR > 200 ms), with or

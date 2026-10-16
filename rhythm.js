@@ -20,10 +20,24 @@ import { DEFAULT_PARAMS, MECHANISMS, PR_FLOOR_MS, PLAUSIBILITY_VERSION, pairAtri
  *             alternatives and secondary findings, flutter / fibrillatory waves, the pacing mode, the stretches of
  *             a strip with more than one rhythm). Evidence never excludes: only the marks rule a reading out.
  *             Without evidence, plausibility's verdicts are exactly P1's.
+ *   P3  1.28  the RP rule reads a SURFACE RP (audit of 16/10/2026, see the cut-offs below): orthodromic AVRT is
+ *             excluded only under 50 ms (the shortest VA recorded in AVRT), a caution from 50 to 90 ms; typical
+ *             AVNRT is favoured up to 90 ms (was: AVRT excluded at ≤ 70 and favoured above 70).
  */
 export { PLAUSIBILITY_VERSION };   // defined beside ENGINE_VERSION (engine.js), so every ladder is stamped with both
 
-export const VA_AP_MIN_MS = 70;      // VA ≤ 70 ms: too short for a circuit through the ventricle and a pathway
+// The RP / VA cut-offs (P3, audit of 16/10/2026). 70 ms is an INTRACARDIAC number: QRS onset → earliest or septal
+// atrial electrogram (Benditt 1979, V-Amin ≤ 61 ms never with a pathway; Knight 2000, septal VA < 70 ms; ESC 2019:
+// "in the electrophysiology laboratory, the cut-off of the ventriculoatrial interval is 70 ms"). The marks give the
+// SURFACE RP (QRS onset → P onset), which runs later than the septal A; its cut-off is 90 ms (ESC 2019, after
+// Letsas 2010; Shi 2025, RP ≤ 90 ms in V1: sensitivity 97 %, specificity 97 % for typical AVNRT). Neither number
+// excludes orthodromic AVRT: VA < 70 ms in 13 % of 495 children with AVRT, the shortest 50 ms (Ceresnak 2015), and in
+// 8 of 46 adults with a left-sided pathway (Nagashima 2016). Only an RP below the shortest VA ever recorded in AVRT
+// rules it out; between that and 90 ms typical AVNRT is favoured and AVRT is unlikely, not excluded.
+export const VA_AP_MIN_MS = 70;      // intracardiac VA cut-off (kept as the rpClass boundary 'veryShort')
+export const VA_AVRT_FLOOR_MS = 50;  // shortest VA recorded in orthodromic AVRT (Ceresnak 2015): below it, AVRT is excluded
+export const RP_AVNRT_SURFACE_MS = 90; // surface RP cut-off: ≤ 90 ms favours typical AVNRT (ESC 2019; Shi 2025)
+const RP_CAVEAT = 'surface RP, not the intracardiac VA; the ECG misreads the SVT type in about 1 in 5 (Kalbfleisch 1993) — the EP study decides';
 export const WIDE_QRS_MS = 120;
 export const TACHY_RR_MS = 600;      // 100 /min
 
@@ -205,12 +219,14 @@ export function plausibility(beats = [], atrial = [], params = null, evidence = 
     } else if (m.relation === '1:1') {
         const rp = `RP ${m.RP} ms, PR ${m.PR} ms`;
         if (m.rpClass === 'veryShort') {
-            exclude(['avrt'], `${rp}: a VA ≤ ${VA_AP_MIN_MS} ms is too short for orthodromic AVRT — the ventricle and the pathway must be activated before the atrium`);
+            if (m.RP < VA_AVRT_FLOOR_MS) exclude(['avrt'], `${rp}: an RP under ${VA_AVRT_FLOOR_MS} ms is shorter than any VA recorded in orthodromic AVRT (${VA_AVRT_FLOOR_MS} ms; Ceresnak 2015) — the ventricle and the pathway must be activated before the atrium`);
+            else caution(['avrt'], `${rp}: orthodromic AVRT unlikely, not excluded — VA < ${VA_AP_MIN_MS} ms occurs in AVRT (13 % of children, Ceresnak 2015; left-sided pathways in adults, Nagashima 2016)`);
             exclude(['pjrt'], `${rp}: PJRT has a long RP`);
             caution(['at'], `${rp}: an atrial tachycardia would need a PR almost as long as the cycle`);
         } else if (m.rpClass === 'short') {
             exclude(['pjrt'], `${rp}: short RP — PJRT has a long RP`);
-            caution(['avnrt'], `${rp}: VA > ${VA_AP_MIN_MS} ms — typical AVNRT unlikely (slow–slow AVNRT possible)`);
+            if (m.RP <= RP_AVNRT_SURFACE_MS) caution(['avrt'], `${rp}: RP ≤ ${RP_AVNRT_SURFACE_MS} ms on the surface ECG favours typical AVNRT (ESC 2019; Shi 2025) — orthodromic AVRT unlikely, not excluded`);
+            else caution(['avnrt'], `${rp}: RP > ${RP_AVNRT_SURFACE_MS} ms on the surface ECG — typical AVNRT unlikely (slow–slow AVNRT possible)`);
         } else if (m.rpClass === 'long') {
             exclude(['avrt'], `${rp}: long RP — a fast accessory pathway returns early (short RP); a long-RP orthodromic tachycardia is PJRT`);
             v.avnrt.reasons.push(`${rp}: long RP — only the atypical (fast–slow) form; typical AVNRT is excluded`);
@@ -295,8 +311,9 @@ export function suggestReading(beats = [], atrial = [], rhythm = {}, params = nu
     else if (m.dissociated && m.RR && m.PP && m.RR > m.PP) s = pick(['avb3'], 'regular P waves unrelated to a slower QRS — complete AV block?');
     else if (m.tachy && m.regularity === 'irregular' && m.relation !== '1:1' && !m.afVeto && !flutterLike) s = pick(['afib'], 'irregular narrow tachycardia without a P before each QRS');
     else if (m.tachy && m.relation === '1:1') {
-        s = m.rpClass === 'veryShort' ? pick(['avnrt', 'jt'], `RP ${m.RP} ms ≤ 70: typical AVNRT (orthodromic AVRT is excluded)`)
-          : m.rpClass === 'short' ? pick(['avrt', 'at', 'avnrt'], `short RP (${m.RP} ms > 70): orthodromic AVRT favoured — AT and slow–slow AVNRT remain`)
+        const avrtLeft = m.RP < VA_AVRT_FLOOR_MS ? `orthodromic AVRT is excluded (RP < ${VA_AVRT_FLOOR_MS} ms)` : 'orthodromic AVRT unlikely, not excluded';
+        s = m.rpClass !== 'long' && m.RP <= RP_AVNRT_SURFACE_MS ? pick(['avnrt', 'jt'], `RP ${m.RP} ms ≤ ${RP_AVNRT_SURFACE_MS}: typical AVNRT favoured (ESC 2019; Shi 2025); ${avrtLeft} — ${RP_CAVEAT}`)
+          : m.rpClass === 'short' ? pick(['avrt', 'at', 'avnrt'], `short RP (${m.RP} ms > ${RP_AVNRT_SURFACE_MS}): orthodromic AVRT favoured — AT and slow–slow AVNRT remain — ${RP_CAVEAT}`)
           : pick(['at', 'avnrt', 'pjrt'], `long RP (RP ${m.RP} > PR ${m.PR}): atrial tachycardia, atypical AVNRT or PJRT`);
     } else if (m.tachy && (m.relation === 'none' || m.nP < Math.max(2, 0.3 * m.nBeats)) && m.regularity !== 'irregular') {
         s = pick(['avnrt'], 'regular narrow tachycardia with no P visible — likely hidden in the QRS (typical AVNRT); mark a retrograde P if you see one');
@@ -666,7 +683,7 @@ export function plausibleParams(mechanism, beats = [], atrial = []) {
             else set('VA', 30, 'typical', 'typical AVNRT: the retrograde P hides in the end of the QRS (pseudo r′ / pseudo S)');
             break;
         case 'avrt':
-            if (oneToOne) set('VA', m.RP, 'measured', measuredVA + (m.RP <= VA_AP_MIN_MS ? ` — at or below ${VA_AP_MIN_MS} ms, shorter than the usual rules allow for AVRT` : ''));
+            if (oneToOne) set('VA', m.RP, 'measured', measuredVA + (m.RP < VA_AVRT_FLOOR_MS ? ` — under ${VA_AVRT_FLOOR_MS} ms, shorter than any VA recorded in AVRT` : m.RP <= RP_AVNRT_SURFACE_MS ? ` — ≤ ${RP_AVNRT_SURFACE_MS} ms favours typical AVNRT; AVRT this short is unusual but recorded` : ''));
             else set('VA', cl ? Math.min(140, Math.round(0.35 * cl)) : 110, 'typical', 'orthodromic AVRT: the retrograde P sits in the ST segment (VA about 100–150 ms)');
             break;
         case 'pjrt':

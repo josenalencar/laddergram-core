@@ -1,5 +1,5 @@
 {
- "engine": "1.17.0",
+ "engine": "1.28.0",
  "figures": {
   "fig0": [
    {
@@ -174,7 +174,7 @@
      "p-retro|A@1|4000|dot"
     ],
     "claims": [
-     "caution|va-ambiguous"
+     "info|"
     ]
    },
    {

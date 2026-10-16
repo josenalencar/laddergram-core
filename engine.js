@@ -105,14 +105,17 @@ function tierContext(list) {
 
 /** Stamped into every ladder and every export, so a figure can say which engine drew it. */
 export const ENGINE_NAME = 'laddergram-core';
-export const ENGINE_VERSION = '1.27.1';   // = package.json version (test_versions.mjs)
+export const ENGINE_VERSION = '1.28.0';   // = package.json version (test_versions.mjs)
 /** The plausibility rules (rhythm.js) as their own versioned component — history in rhythm.js and the viewer's js/versions.js. */
-export const PLAUSIBILITY_VERSION = 'P2.1';
+export const PLAUSIBILITY_VERSION = 'P3';
 
 /** Sources for the default intervals and plausibility thresholds shown to users. */
 export const REFERENCES = {
     josephson: "Josephson ME. Josephson's Clinical Cardiac Electrophysiology: Techniques and Interpretations. 6th ed. Wolters Kluwer; 2021.",
     issa: "Issa ZF, Miller JM, Zipes DP. Clinical Arrhythmology and Electrophysiology: A Companion to Braunwald's Heart Disease. 3rd ed. Elsevier; 2019.",
+    esc2019: 'Brugada J, Katritsis DG, Arbelo E, et al. 2019 ESC Guidelines for the management of patients with supraventricular tachycardia. Eur Heart J. 2020;41:655-720.',
+    shi2025: 'Shi N, Liu I, Klein G, Antiperovitch P. Utility of the surface electrocardiogram RP interval cutoff for diagnosis of atrioventricular nodal reentrant tachycardia. J Electrocardiol. 2025;92:154094.',
+    ceresnak2015: 'Ceresnak SR, Doan LN, Motonaga KS, et al. 50 is the new 70: short ventriculoatrial times are common in children with atrioventricular reciprocating tachycardia. Heart Rhythm. 2015;12:1541-7.',
 };
 
 export const DEFAULT_PARAMS = Object.freeze({
@@ -153,7 +156,7 @@ export const PARAM_INFO = {
     AHmin: { kind: 'assumed', label: 'AH minimum', unit: 'ms', normal: [55, 125], normalOf: 'AH', ref: 'josephson', what: 'the fastest the AV node conducts; a PR shorter than PA + AH min + HV is drawn as pre-excitation' },
     PRmin: { kind: 'pairing', label: 'PR min (pairing)', unit: 'ms', adv: true, what: 'a P closer than this to a QRS is not the one that conducted it' },
     PRmax: { kind: 'pairing', label: 'PR max (pairing)', unit: 'ms', adv: true, what: 'a P further than this from a QRS is not the one that conducted it' },
-    VA: { kind: 'clinical', label: 'VA (QRS onset → retro P)', unit: 'ms', threshold: { at: 70, meaning: '≤ 70 ms favours typical AVNRT; > 70 ms allows orthodromic AVRT' }, ref: 'issa', what: 'QRS onset → retrograde P onset: where the returning wave reaches the atrium' },
+    VA: { kind: 'clinical', label: 'VA (QRS onset → retro P)', unit: 'ms', threshold: { at: 90, meaning: 'surface RP ≤ 90 ms favours typical AVNRT (the 70 ms cut-off is the intracardiac VA); orthodromic AVRT is unlikely under 70 ms and has not been recorded under 50 ms' }, ref: 'esc2019', what: 'QRS onset → retrograde P onset: where the returning wave reaches the atrium' },
     apVdelay: { kind: 'assumed', label: 'QRS onset → AP ventricular end', unit: 'ms', adv: true, what: 'QRS onset → the ventricular end of the accessory pathway' },
     apToAV: { kind: 'orphan', label: 'Retro A → AV-node entry', unit: 'ms', adv: true, what: 'retrograde atrial activation → the next entry into the AV node (AH estimate only; the atrium is drawn instantaneous)' },
     vExit: { kind: 'assumed', label: 'PVC focus → His exit', unit: 'ms', adv: true, what: 'ectopic focus → exit into the His–Purkinje system (retrograde)' },
@@ -1087,7 +1090,7 @@ function buildAvnrt(B, input) {
     B.L.intervals = measureIntervals(beats, [], new Map(), P).map(iv => ({ ...iv, VAms: VA }));
     const atypical = rr && VA > rr / 2;
     if (atypical) B.note(`VA ${VA} ms > RR/2 (${Math.round(rr / 2)} ms): long RP — atypical (fast–slow) AVNRT; slow limb drawn retrograde.`);
-    else if (VA <= 70) B.note(`VA ${VA} ms ≤ 70 ms: typical (slow–fast) AVNRT — retrograde P inside or just after the QRS.`);
+    else if (VA <= 90) B.note(`VA ${VA} ms ≤ 90 ms: typical (slow–fast) AVNRT — retrograde P inside or just after the QRS.`);
     else B.note(`VA ${VA} ms: slow–slow or atypical AVNRT, or AVRT — consider the accessory-pathway mechanism.`, 'caution', 'va-ambiguous');
     if (ntBad) B.note(`${ntBad} beat(s) where VA leaves no time for antegrade conduction before the next QRS — VA too long for this cycle length.`, 'warning', 'va-too-long');
 }
@@ -1120,7 +1123,8 @@ function buildAvrt(B, input, { pjrt = false } = {}) {
     });
     B.L.intervals = measureIntervals(beats, [], new Map(), P).map(iv => ({ ...iv, VAms: VA }));
     const rpLong = rr && VA > rr / 2;
-    if (VA < 70) B.note(`VA ${VA} ms < 70 ms: too short for orthodromic AVRT (the ventricle and the pathway must be activated first) — typical AVNRT is more likely.`, 'warning', 'va-too-short-for-ap');
+    if (VA < 50) B.note(`VA ${VA} ms < 50 ms: too short for orthodromic AVRT (the ventricle and the pathway must be activated first; the shortest VA recorded in AVRT is 50 ms) — typical AVNRT is more likely.`, 'warning', 'va-too-short-for-ap');
+    else if (VA < 70) B.note(`VA ${VA} ms < 70 ms: short for orthodromic AVRT — recorded in children and with left-sided pathways, but typical AVNRT is more likely.`, 'caution', 'va-short-for-ap');
     else if (pjrt) B.note(`PJRT, VA ${VA} ms: antegrade AV node → His → V, retrograde over a slowly conducting, decremental accessory pathway (drawn wavy).`);
     else B.note(`Orthodromic AVRT, VA ${VA} ms: antegrade AV node → His → V, retrograde over the accessory pathway (AP).`);
     if (pjrt && rr && !rpLong) B.note(`PJRT has a long RP; here VA ${VA} ms ≤ RR/2 (${Math.round(rr / 2)} ms).`, 'caution', 'pjrt-short-rp');

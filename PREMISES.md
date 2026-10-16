@@ -86,6 +86,13 @@ submission): every one of them was an error the previous rule produced.
 - The accessory pathway has no tier of its own: one straight line labelled "AP" (wavy when slow and
   decremental, as in PJRT).
 - A long RP rules out orthodromic AVRT and typical AVNRT; PJRT is its own mechanism.
+- The RP on the marks is a SURFACE RP (QRS onset → P onset), not the intracardiac VA. 70 ms is the intracardiac
+  cut-off (Benditt 1979; Knight 2000; ESC 2019); on the surface ECG it is 90 ms (ESC 2019 after Letsas 2010; Shi 2025:
+  RP ≤ 90 ms in V1, sensitivity 97 %, specificity 97 % for typical AVNRT). A cut-off that specific orders the readings,
+  it does not exclude one: orthodromic AVRT is excluded only under 50 ms, the shortest VA recorded in AVRT (13 % of
+  children have VA < 70 ms, Ceresnak 2015; so do left-sided pathways in adults, Nagashima 2016). Up to 90 ms typical
+  AVNRT is favoured and AVRT is a caution; above 90 ms AVRT is favoured. Every suggestion says the ECG misreads the
+  SVT type in about one in five (Kalbfleisch 1993) and that the EP study decides. (P3, audit of 16/10/2026.)
 - Mobitz II: block drawn in the His. Wenckebach and 2:1: in the AV node. Wenckebach needs a monotonic AH rise
   of ≥30 ms and a post-block AH ≥20 ms shorter; a premature blocked P is a blocked PAC, checked first.
   Curvature (decrement) only inside a Wenckebach cycle.

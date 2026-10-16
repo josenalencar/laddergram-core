@@ -46,6 +46,27 @@ ok('twoToOne: more P than QRS, AVRT excluded', R('twoToOne').relation === 'A>V' 
 ok('narrow sinus: antidromic AVRT excluded', V('sinus').avrtAnti.status === 'excluded');
 ok('no P marked: nothing excluded by RP', plausibility(truthMarks('avnrt').beats, []).verdicts.avrt.status !== 'excluded');
 
+console.log('\nthe RP bands (P3, audit 16/10/2026: surface RP; ESC 2019, Shi 2025, Ceresnak 2015, Nagashima 2016)');
+{
+    // a regular narrow tachycardia, CL 360 ms, one P per cycle at a fixed RP from each QRS onset
+    const svt = (rp) => {
+        const beats = Array.from({ length: 10 }, (_, i) => ({ id: 'b' + i, qrsOnMs: 400 + i * 360, qrsOffMs: 490 + i * 360, quality: 'normal' }));
+        const atrial = beats.map((b, i) => ({ id: 'a' + i, tMs: b.qrsOnMs + rp }));
+        return { beats, atrial, v: plausibility(beats, atrial).verdicts, s: suggestReading(beats, atrial) };
+    };
+    const r40 = svt(40), r60 = svt(60), r80 = svt(80), r100 = svt(100);
+    ok('RP 40: orthodromic AVRT excluded (under the shortest VA recorded in AVRT, 50 ms)', r40.v.avrt.status === 'excluded' && r40.v.avrt.reasons.some(x => /Ceresnak/.test(x)));
+    ok('RP 40: suggestion is typical AVNRT', r40.s.id === 'avnrt');
+    ok('RP 60: orthodromic AVRT NOT excluded — a caution (VA < 70 ms occurs in AVRT)', r60.v.avrt.status === 'caution' && r60.v.avrt.reasons.some(x => /not excluded/.test(x)));
+    ok('RP 60: typical AVNRT ok and suggested, the reason says "favoured", not "is"', r60.v.avnrt.status === 'ok' && r60.s.id === 'avnrt' && /favoured/.test(r60.s.reason) && /EP study decides/.test(r60.s.reason));
+    ok('RP 80: typical AVNRT ok, AVRT a caution (RP ≤ 90 ms on the surface favours AVNRT)', r80.v.avnrt.status === 'ok' && r80.v.avrt.status === 'caution');
+    ok('RP 80: suggestion is typical AVNRT (was orthodromic AVRT before P3)', r80.s.id === 'avnrt' && /90/.test(r80.s.reason));
+    ok('RP 100: AVRT ok and suggested, typical AVNRT a caution', r100.v.avrt.status === 'ok' && r100.v.avnrt.status === 'caution' && r100.s.id === 'avrt');
+    ok('RP 100: the suggestion still says the surface RP is not the VA', /surface RP/.test(r100.s.reason));
+    ok('PJRT excluded at every short RP', [r40, r60, r80, r100].every(r => r.v.pjrt.status === 'excluded'));
+    ok('svtShortRP (RP 80): its expected reading, AVNRT, is now the suggestion', suggestReading(truthMarks('svtShortRP').beats, truthMarks('svtShortRP').atrial).id === 'avnrt');
+}
+
 console.log('\ntimings per mechanism');
 {
     const { beats, atrial } = truthMarks('svtLongRP');

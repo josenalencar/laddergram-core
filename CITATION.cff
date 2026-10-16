@@ -7,8 +7,8 @@ authors:
     given-names: "José"
     orcid: "https://orcid.org/0000-0002-3835-6067"
     affiliation: "Instituto Dante Pazzanese de Cardiologia, São Paulo, Brazil"
-version: "1.27.1"
-date-released: "2026-10-04"
+version: "1.28.0"
+date-released: "2026-10-16"
 license: PolyForm-Noncommercial-1.0.0
 doi: "10.5281/zenodo.22884897"
 repository-code: "https://github.com/josenalencar/laddergram-core"

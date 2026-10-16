@@ -28,7 +28,7 @@ function truthMarks(id) {
 }
 
 section('the catalogue');
-ok(`PLAUSIBILITY_VERSION is P2.1 (${PLAUSIBILITY_VERSION})`, PLAUSIBILITY_VERSION === 'P2.1');
+ok(`PLAUSIBILITY_VERSION is P3 (${PLAUSIBILITY_VERSION})`, PLAUSIBILITY_VERSION === 'P3');
 ok('every reading draws with a mechanism the engine knows', READINGS.every(r => MECHANISMS.some(m => m.id === r.mechanism)));
 ok('every mechanism has its plain reading (id = mechanism id)', MECHANISMS.every(m => readingOf(m.id)?.mechanism === m.id));
 ok('every reading is in a family', READINGS.every(r => READING_FAMILIES.includes(r.family)));
@@ -83,11 +83,14 @@ section('the conduction patterns, one by one');
         && readPacing(truthMarks('ddd').beats, truthMarks('ddd').atrial).mode === 'DDD' && readPacing(truthMarks('aai').beats, truthMarks('aai').atrial).mode === 'AAI');
 }
 
-section('without evidence the verdicts are P1\'s, exactly (the rhythm detector\'s gate)');
+section('without evidence the verdicts are P1\'s, exactly, except the RP rule P3 rewrote (the rhythm detector\'s gate)');
 {
     const here = dirname(fileURLToPath(import.meta.url));
     const P1 = JSON.parse(readFileSync(join(here, 'fixtures', 'p1-verdicts.json'), 'utf8'));
-    const pick = (v) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, [x.status, ...x.reasons]]));
+    // P3 (16/10/2026) changed what the surface RP says about AVNRT and orthodromic AVRT, and nothing else
+    const P3_KEYS = new Set(['avnrt', 'avrt']);
+    const pick = (v) => Object.fromEntries(Object.entries(v).filter(([k]) => !P3_KEYS.has(k)).map(([k, x]) => [k, [x.status, ...x.reasons]]));
+    for (const which of ['truth', 'detected']) for (const id of Object.keys(P1[which])) P1[which][id] = Object.fromEntries(Object.entries(P1[which][id]).filter(([k]) => !P3_KEYS.has(k)));
     let same = 0, n = 0, diff = [];
     for (const sc of SYNTH_SCENARIOS) {
         const { beats, atrial } = truthMarks(sc.id);
@@ -95,7 +98,7 @@ section('without evidence the verdicts are P1\'s, exactly (the rhythm detector\'
         const m = detectMarks(makeExample(sc.id));
         n++; if (JSON.stringify(pick(plausibility(m.beats, m.atrial).verdicts)) === JSON.stringify(P1.detected[sc.id])) same++; else diff.push(sc.id + ' (detected)');
     }
-    ok(`${same}/${n} verdict sets identical to laddergram-core 1.26.1`, same === n, diff.join(', '));
+    ok(`${same}/${n} verdict sets identical to laddergram-core 1.26.1 outside AVNRT / AVRT`, same === n, diff.join(', '));
 }
 
 section('evidence ranks, never excludes');
